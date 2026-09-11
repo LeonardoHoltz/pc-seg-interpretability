@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Point Cloud Interpretability Tool</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2314181d'/%3E%3Ccircle cx='10' cy='12' r='2.6' fill='%234e9eff'/%3E%3Ccircle cx='21' cy='10' r='2.6' fill='%2345c78a'/%3E%3Ccircle cx='16' cy='20' r='2.6' fill='%23e0a33c'/%3E%3Ccircle cx='23' cy='22' r='2.2' fill='%23e05c68'/%3E%3C/svg%3E">
+
+<link rel="stylesheet" href="vendor/potree/potree.css">
+<link rel="stylesheet" href="vendor/potree/libs/jquery-ui.css">
+<link rel="stylesheet" href="vendor/potree/libs/spectrum.css">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+
+<div id="app" class="loading">
+
+  <!-- ------------------------------------------------ app bar ---------- -->
+  <header id="app-bar">
+    <h1>Point Cloud Interpretability</h1>
+    <nav class="tabs" id="left-tabs" role="tablist">
+      <button data-tab="scenes" class="on" role="tab">Scenes</button>
+      <button data-tab="library" role="tab">Object library</button>
+      <button data-tab="segmentation" role="tab"
+              title="Send this scene to a segmentation service">Segmentation</button>
+    </nav>
+  </header>
+
+  <!-- ------------------------------------------------ scenes ----------- -->
+  <aside class="panel" id="scenes-panel">
+
+    <div class="tab-page on" data-page="scenes">
+      <div class="tab-hint">Mapped scenes &mdash; nothing is loaded until you pick one</div>
+      <div class="search-wrap">
+        <input id="scene-search" type="text" placeholder="Filter scenes, folders or fields…" spellcheck="false">
+      </div>
+      <div class="panel-body" id="scene-list"></div>
+    </div>
+
+    <div class="tab-page" data-page="library">
+      <div class="tab-hint">Objects cut out of every converted scene</div>
+      <div class="search-wrap">
+        <input id="library-search" type="text" placeholder="Filter objects…" spellcheck="false">
+        <div class="segmented" id="library-groupby">
+          <button data-group="class" class="on">By class</button>
+          <button data-group="scene">By scene</button>
+        </div>
+      </div>
+      <div class="panel-body" id="library-list"></div>
+    </div>
+
+    <div class="tab-page" data-page="segmentation">
+      <div class="tab-hint">Send this scene for inference, then probe the model</div>
+      <div class="panel-body" id="segmentation-body"></div>
+    </div>
+
+    <div class="panel-foot">
+      <code id="scenes-dir" title=""></code>
+      <button class="icon-btn" id="refresh-scenes" title="Rescan the scenes folder">⟳</button>
+    </div>
+  </aside>
+
+  <!-- ------------------------------------------------ viewport --------- -->
+  <div id="viewport">
+    <div id="render-area"></div>
+
+    <div id="topbar">
+      <button class="icon-btn" id="toggle-scenes" title="Toggle the scene browser">☰</button>
+      <div>
+        <div class="scene-title" id="scene-title">No scene loaded</div>
+        <div class="scene-sub" id="scene-sub"></div>
+      </div>
+      <div class="spacer"></div>
+      <button class="icon-btn" id="btn-fit" title="Fit the cloud to the screen">⛶</button>
+      <button class="icon-btn" id="btn-stats" title="Toggle the statistics overlay">📊</button>
+      <button class="icon-btn" id="toggle-controls" title="Toggle the appearance panel">⚙</button>
+    </div>
+
+    <div id="stats-overlay"></div>
+
+    <div id="stage-message">
+      <div class="inner">
+        <div class="glyph">◦ ◌ ◦</div>
+        <h2 id="stage-title">Select a scene to begin</h2>
+        <p id="stage-text">
+          Scenes under <code>scenes/</code> are mapped but not loaded. Choosing one
+          converts it to a Potree octree the first time, then streams it here.
+        </p>
+        <div class="hint" id="stage-hint">npm run demo &nbsp;# generate a sample scene</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ------------------------------------------------ controls --------- -->
+  <aside class="panel" id="control-panel">
+    <div class="panel-head">
+      <h1>Appearance</h1>
+      <div class="sub" id="control-sub">Colouring and rendering</div>
+    </div>
+
+    <div class="panel-body">
+
+      <section class="section" id="sec-attributes">
+        <header><span class="caret">▼</span><h2>Colour by</h2><span class="count" id="attr-count"></span></header>
+        <div class="content" id="attribute-list">
+          <div class="empty-note">Load a scene first.</div>
+        </div>
+      </section>
+
+      <section class="section" id="sec-mapping">
+        <header><span class="caret">▼</span><h2 id="mapping-title">Mapping</h2></header>
+        <div class="content" id="mapping-content">
+          <div class="empty-note">Load a scene first.</div>
+        </div>
+      </section>
+
+      <section class="section" id="sec-placed">
+        <header>
+          <span class="caret">▼</span><h2>Placed objects</h2>
+          <span class="count" id="placed-count"></span>
+        </header>
+        <div class="content">
+          <div class="ctl">
+          <label><span>Highlight style</span></label>
+          <div class="segmented" id="highlight-style">
+            <button data-style="contour" class="on">Contour</button>
+            <button data-style="box">Bounding box</button>
+          </div>
+        </div>
+        <div id="placed-list"></div>
+          <div id="transform-content"></div>
+          <div class="btn-row" style="margin-top:10px">
+            <button class="btn small" id="clear-placed">Remove all</button>
+            <button class="btn small primary" id="integrate-placed"
+                    title="Merge every placed object into this scene's octree">Integrate into scene</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="section collapsed" id="sec-render">
+        <header><span class="caret">▼</span><h2>Rendering</h2></header>
+        <div class="content" id="render-content"></div>
+      </section>
+
+      <section class="section collapsed" id="sec-info">
+        <header><span class="caret">▼</span><h2>Scene details</h2></header>
+        <div class="content" id="info-content">
+          <div class="empty-note">Load a scene first.</div>
+        </div>
+      </section>
+
+    </div>
+  </aside>
+</div>
+
+<div id="toast"></div>
+
+<!-- Potree and its dependencies, all served locally -->
+<script src="vendor/potree/libs/jquery.js"></script>
+<script src="vendor/potree/libs/spectrum.js"></script>
+<script src="vendor/potree/libs/jquery-ui.js"></script>
+<script src="vendor/potree/libs/BinaryHeap.js"></script>
+<script src="vendor/potree/libs/tween.js"></script>
+<script src="vendor/potree/libs/d3.js"></script>
+<script src="vendor/potree/libs/proj4.js"></script>
+<script src="vendor/potree/libs/i18next.js"></script>
+<script src="vendor/potree/potree.js"></script>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

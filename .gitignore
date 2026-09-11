@@ -1,0 +1,7 @@
+.potree-build/
+cache/
+scenes/
+node_modules/
+web/vendor/
+
+__pycache__/
