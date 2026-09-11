@@ -14,6 +14,7 @@ import { writePcd } from "./pcd_write.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const SCENES = join(ROOT, "scenes");
+const CONFIG = join(ROOT, "config");
 
 // Deterministic PRNG so regenerating a scene gives the same points.
 function rng(seed) {
@@ -159,7 +160,10 @@ function writeScene(name, encoding, seed, opts, description) {
   writePcd(file, columns, encoding);
 
   // Sidecar giving human-readable names + colours for the segmentation field.
-  writeFileSync(join(SCENES, `${name}.classes.json`), JSON.stringify({
+  // It describes the dataset rather than the points, so it goes to config/,
+  // which is tracked, while the .pcd stays in the untracked scenes/.
+  mkdirSync(CONFIG, { recursive: true });
+  writeFileSync(join(CONFIG, `${name}.classes.json`), JSON.stringify({
     description,
     fields: {
       label: {

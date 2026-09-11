@@ -30,7 +30,7 @@ import { join, resolve, extname, normalize } from "node:path";
 import { Worker } from "node:worker_threads";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { WEB_DIR, CACHE_DIR, SCENES_DIR, ROOT } from "./paths.mjs";
+import { WEB_DIR, CACHE_DIR, SCENES_DIR, CONFIG_DIR, ROOT } from "./paths.mjs";
 import { listScenes, describeScene, resolveScene, cacheDirFor } from "./scene/registry.mjs";
 import { previewPayload } from "./inference/predict.mjs";
 
@@ -556,6 +556,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     console.log(`point cloud interpretability tool`);
     console.log(`  serving   http://${host}:${port}`);
     console.log(`  scenes    ${SCENES_DIR}`);
+    console.log(`  config    ${CONFIG_DIR}`);
     console.log(`  cache     ${CACHE_DIR}`);
     const n = listScenes().length;
     console.log(`  ${n} scene(s) mapped` + (n === 0 ? " -- run `npm run demo` for a sample" : ""));

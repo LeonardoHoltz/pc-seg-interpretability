@@ -63,14 +63,19 @@ per-class visibility — that is a limit of Potree's shader, which has exactly o
 LUT. The panel offers a **“Make *field* the class field”** button that reconverts the
 scene so a different field takes that slot.
 
-Class order, names and colours can be pinned with a config file. A `classes.json` in any
-folder between `scenes/` and the scene applies to **everything beneath it**, so a whole
-dataset is described once:
+Class order, names and colours can be pinned with a config file. These live under
+`config/`, a **shadow tree of `scenes/`**: same layout, same naming rules, but tracked in
+git, because what a label *means* is part of the repo while the points are bulk data. A
+`classes.json` in any folder between the root and the scene applies to **everything
+beneath it**, so a whole dataset is described once:
 
 ```
-scenes/scannet_subset/classes.json      <- applies to all 12 scenes below
-scenes/my_scan.classes.json             <- applies to that one scene
+config/scannet_subset/classes.json      <- applies to all 12 scenes below
+config/my_scan.classes.json             <- applies to that one scene
 ```
+
+`scenes/` is searched the same way afterwards, so a `classes.json` dropped next to the
+points still wins — handy for a one-off scan you do not want to describe in the repo.
 
 Closer files win over further ones and a per-scene sidecar wins over all of them, merging
 field by field — so a dataset config can name the classes while one scene overrides a
@@ -78,15 +83,15 @@ single field. A config may also nominate the **class field** with `primaryField`
 matters for a dataset shipping several label sets (ScanNet has both `segment20` and
 `segment200`).
 
-`scenes/scannet_subset/classes.json` is a worked example, generated from Pointcept's own
+`config/scannet_subset/classes.json` is a worked example, generated from Pointcept's own
 `scannet200_constants.py`, so the 20 and 200 class names and the official ScanNet colours
 are the real ones rather than approximations. `segment20`/`segment200` store the *index*
 into `VALID_CLASS_IDS_*` with `-1` for unlabelled, and the config maps that back to names.
 
-The per-scene form sits next to the PCD:
+The per-scene form mirrors the PCD's path under `config/`:
 
 ```jsonc
-// scenes/my_scan.classes.json
+// config/my_scan.classes.json
 {
   "description": "Shown in the viewer header",
   "fields": {
@@ -528,15 +533,15 @@ point. Run it after touching the converter.
 ## Layout
 
 ```
-scenes/          your scenes: .pcd files, or folders of .npy arrays
-                 (+ optional classes.json configs, per folder or per scene)
-cache/           generated octrees, one folder per scene
+scenes/          your scenes: .pcd files, or folders of .npy arrays  (untracked)
+config/          classes.json dataset configs, mirroring the scenes/ layout
+cache/           generated octrees, one folder per scene                (untracked)
 examples/        reference segmentation service (documents the wire format)
 tools/           viewer build, demo scenes, octree verifier
 
 src/
   server.mjs     HTTP server: the API, SSE progress, Range-capable static files
-  paths.mjs      where scenes and the cache live
+  paths.mjs      where scenes, configs and the cache live
 
   io/            getting points off disk
     pcd.mjs        PCD reader (ascii / binary / binary_compressed)

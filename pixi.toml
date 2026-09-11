@@ -1,0 +1,28 @@
+# Python environment for examples/. Nothing in src/, web/ or tools/ needs this
+# -- the viewer itself is Node -- it exists so the reference segmentation
+# service is runnable with one command, from anywhere in the repo:
+#
+#     pixi run segmentation-example
+#
+# The viewer's Segmentation tab then points at http://127.0.0.1:8500.
+# Task names are prefixed rather than called `serve`, so they don't read as
+# alternatives to `npm run serve`, which starts the viewer.
+
+[workspace]
+name = "point-cloud-interpretability-tool"
+description = "Python environment for the reference segmentation inference service"
+version = "0.1.0"
+channels = ["conda-forge"]
+platforms = ["linux-64", "osx-64", "osx-arm64", "win-64"]
+
+[dependencies]
+python = ">=3.10,<3.14"
+numpy = ">=1.24"
+
+[tasks]
+# Saliency for every point in the scene.
+segmentation-example = "python examples/segmentation_service.py --port 8500"
+
+# Saliency for the masked object only; the viewer reads the rest of the scene
+# as zero. Same endpoint, the other branch of the contract.
+segmentation-example-object = "python examples/segmentation_service.py --port 8500 --scope object"

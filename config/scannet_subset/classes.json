@@ -1,0 +1,1805 @@
+{
+  "description": "ScanNet v2 indoor scans (Pointcept preprocessing: contiguous training ids, -1 = ignore)",
+  "primaryField": "segment20",
+  "fields": {
+    "segment20": {
+      "name": "Semantic class (ScanNet 20)",
+      "classes": {
+        "-1": {
+          "name": "unlabeled",
+          "color": [
+            95,
+            99,
+            108
+          ]
+        },
+        "0": {
+          "name": "wall",
+          "color": [
+            174,
+            199,
+            232
+          ]
+        },
+        "1": {
+          "name": "floor",
+          "color": [
+            152,
+            223,
+            138
+          ]
+        },
+        "2": {
+          "name": "cabinet",
+          "color": [
+            31,
+            119,
+            180
+          ]
+        },
+        "3": {
+          "name": "bed",
+          "color": [
+            255,
+            187,
+            120
+          ]
+        },
+        "4": {
+          "name": "chair",
+          "color": [
+            188,
+            189,
+            34
+          ]
+        },
+        "5": {
+          "name": "sofa",
+          "color": [
+            140,
+            86,
+            75
+          ]
+        },
+        "6": {
+          "name": "table",
+          "color": [
+            255,
+            152,
+            150
+          ]
+        },
+        "7": {
+          "name": "door",
+          "color": [
+            214,
+            39,
+            40
+          ]
+        },
+        "8": {
+          "name": "window",
+          "color": [
+            197,
+            176,
+            213
+          ]
+        },
+        "9": {
+          "name": "bookshelf",
+          "color": [
+            148,
+            103,
+            189
+          ]
+        },
+        "10": {
+          "name": "picture",
+          "color": [
+            196,
+            156,
+            148
+          ]
+        },
+        "11": {
+          "name": "counter",
+          "color": [
+            23,
+            190,
+            207
+          ]
+        },
+        "12": {
+          "name": "desk",
+          "color": [
+            247,
+            182,
+            210
+          ]
+        },
+        "13": {
+          "name": "curtain",
+          "color": [
+            219,
+            219,
+            141
+          ]
+        },
+        "14": {
+          "name": "refrigerator",
+          "color": [
+            255,
+            127,
+            14
+          ]
+        },
+        "15": {
+          "name": "shower curtain",
+          "color": [
+            158,
+            218,
+            229
+          ]
+        },
+        "16": {
+          "name": "toilet",
+          "color": [
+            44,
+            160,
+            44
+          ]
+        },
+        "17": {
+          "name": "sink",
+          "color": [
+            112,
+            128,
+            144
+          ]
+        },
+        "18": {
+          "name": "bathtub",
+          "color": [
+            227,
+            119,
+            194
+          ]
+        },
+        "19": {
+          "name": "otherfurniture",
+          "color": [
+            82,
+            84,
+            163
+          ]
+        }
+      }
+    },
+    "segment200": {
+      "name": "Semantic class (ScanNet 200)",
+      "classes": {
+        "-1": {
+          "name": "unlabeled",
+          "color": [
+            95,
+            99,
+            108
+          ]
+        },
+        "0": {
+          "name": "wall",
+          "color": [
+            174,
+            199,
+            232
+          ]
+        },
+        "1": {
+          "name": "chair",
+          "color": [
+            188,
+            189,
+            34
+          ]
+        },
+        "2": {
+          "name": "floor",
+          "color": [
+            152,
+            223,
+            138
+          ]
+        },
+        "3": {
+          "name": "table",
+          "color": [
+            255,
+            152,
+            150
+          ]
+        },
+        "4": {
+          "name": "door",
+          "color": [
+            214,
+            39,
+            40
+          ]
+        },
+        "5": {
+          "name": "couch",
+          "color": [
+            91,
+            135,
+            229
+          ]
+        },
+        "6": {
+          "name": "cabinet",
+          "color": [
+            31,
+            119,
+            180
+          ]
+        },
+        "7": {
+          "name": "shelf",
+          "color": [
+            229,
+            91,
+            104
+          ]
+        },
+        "8": {
+          "name": "desk",
+          "color": [
+            247,
+            182,
+            210
+          ]
+        },
+        "9": {
+          "name": "office chair",
+          "color": [
+            91,
+            229,
+            110
+          ]
+        },
+        "10": {
+          "name": "bed",
+          "color": [
+            255,
+            187,
+            120
+          ]
+        },
+        "11": {
+          "name": "pillow",
+          "color": [
+            141,
+            91,
+            229
+          ]
+        },
+        "12": {
+          "name": "sink",
+          "color": [
+            112,
+            128,
+            144
+          ]
+        },
+        "13": {
+          "name": "picture",
+          "color": [
+            196,
+            156,
+            148
+          ]
+        },
+        "14": {
+          "name": "window",
+          "color": [
+            197,
+            176,
+            213
+          ]
+        },
+        "15": {
+          "name": "toilet",
+          "color": [
+            44,
+            160,
+            44
+          ]
+        },
+        "16": {
+          "name": "bookshelf",
+          "color": [
+            148,
+            103,
+            189
+          ]
+        },
+        "17": {
+          "name": "monitor",
+          "color": [
+            229,
+            91,
+            223
+          ]
+        },
+        "18": {
+          "name": "curtain",
+          "color": [
+            219,
+            219,
+            141
+          ]
+        },
+        "19": {
+          "name": "book",
+          "color": [
+            192,
+            229,
+            91
+          ]
+        },
+        "20": {
+          "name": "armchair",
+          "color": [
+            88,
+            218,
+            137
+          ]
+        },
+        "21": {
+          "name": "coffee table",
+          "color": [
+            58,
+            98,
+            137
+          ]
+        },
+        "22": {
+          "name": "box",
+          "color": [
+            177,
+            82,
+            239
+          ]
+        },
+        "23": {
+          "name": "refrigerator",
+          "color": [
+            255,
+            127,
+            14
+          ]
+        },
+        "24": {
+          "name": "lamp",
+          "color": [
+            237,
+            204,
+            37
+          ]
+        },
+        "25": {
+          "name": "kitchen cabinet",
+          "color": [
+            41,
+            206,
+            32
+          ]
+        },
+        "26": {
+          "name": "towel",
+          "color": [
+            62,
+            143,
+            148
+          ]
+        },
+        "27": {
+          "name": "clothes",
+          "color": [
+            34,
+            14,
+            130
+          ]
+        },
+        "28": {
+          "name": "tv",
+          "color": [
+            143,
+            45,
+            115
+          ]
+        },
+        "29": {
+          "name": "nightstand",
+          "color": [
+            137,
+            63,
+            14
+          ]
+        },
+        "30": {
+          "name": "counter",
+          "color": [
+            23,
+            190,
+            207
+          ]
+        },
+        "31": {
+          "name": "dresser",
+          "color": [
+            16,
+            212,
+            139
+          ]
+        },
+        "32": {
+          "name": "stool",
+          "color": [
+            90,
+            119,
+            201
+          ]
+        },
+        "33": {
+          "name": "cushion",
+          "color": [
+            125,
+            30,
+            141
+          ]
+        },
+        "34": {
+          "name": "plant",
+          "color": [
+            150,
+            53,
+            56
+          ]
+        },
+        "35": {
+          "name": "ceiling",
+          "color": [
+            186,
+            197,
+            62
+          ]
+        },
+        "36": {
+          "name": "bathtub",
+          "color": [
+            227,
+            119,
+            194
+          ]
+        },
+        "37": {
+          "name": "end table",
+          "color": [
+            38,
+            100,
+            128
+          ]
+        },
+        "38": {
+          "name": "dining table",
+          "color": [
+            120,
+            31,
+            243
+          ]
+        },
+        "39": {
+          "name": "keyboard",
+          "color": [
+            154,
+            59,
+            103
+          ]
+        },
+        "40": {
+          "name": "bag",
+          "color": [
+            169,
+            137,
+            78
+          ]
+        },
+        "41": {
+          "name": "backpack",
+          "color": [
+            143,
+            245,
+            111
+          ]
+        },
+        "42": {
+          "name": "toilet paper",
+          "color": [
+            37,
+            230,
+            205
+          ]
+        },
+        "43": {
+          "name": "printer",
+          "color": [
+            14,
+            16,
+            155
+          ]
+        },
+        "44": {
+          "name": "tv stand",
+          "color": [
+            196,
+            51,
+            182
+          ]
+        },
+        "45": {
+          "name": "whiteboard",
+          "color": [
+            237,
+            80,
+            38
+          ]
+        },
+        "46": {
+          "name": "blanket",
+          "color": [
+            138,
+            175,
+            62
+          ]
+        },
+        "47": {
+          "name": "shower curtain",
+          "color": [
+            158,
+            218,
+            229
+          ]
+        },
+        "48": {
+          "name": "trash can",
+          "color": [
+            38,
+            96,
+            167
+          ]
+        },
+        "49": {
+          "name": "closet",
+          "color": [
+            190,
+            77,
+            246
+          ]
+        },
+        "50": {
+          "name": "stairs",
+          "color": [
+            208,
+            49,
+            84
+          ]
+        },
+        "51": {
+          "name": "microwave",
+          "color": [
+            208,
+            193,
+            72
+          ]
+        },
+        "52": {
+          "name": "stove",
+          "color": [
+            55,
+            220,
+            57
+          ]
+        },
+        "53": {
+          "name": "shoe",
+          "color": [
+            10,
+            125,
+            140
+          ]
+        },
+        "54": {
+          "name": "computer tower",
+          "color": [
+            76,
+            38,
+            202
+          ]
+        },
+        "55": {
+          "name": "bottle",
+          "color": [
+            191,
+            28,
+            135
+          ]
+        },
+        "56": {
+          "name": "bin",
+          "color": [
+            211,
+            120,
+            42
+          ]
+        },
+        "57": {
+          "name": "ottoman",
+          "color": [
+            118,
+            174,
+            76
+          ]
+        },
+        "58": {
+          "name": "bench",
+          "color": [
+            17,
+            242,
+            171
+          ]
+        },
+        "59": {
+          "name": "board",
+          "color": [
+            20,
+            65,
+            247
+          ]
+        },
+        "60": {
+          "name": "washing machine",
+          "color": [
+            208,
+            61,
+            222
+          ]
+        },
+        "61": {
+          "name": "mirror",
+          "color": [
+            162,
+            62,
+            60
+          ]
+        },
+        "62": {
+          "name": "copier",
+          "color": [
+            210,
+            235,
+            62
+          ]
+        },
+        "63": {
+          "name": "basket",
+          "color": [
+            45,
+            152,
+            72
+          ]
+        },
+        "64": {
+          "name": "sofa chair",
+          "color": [
+            35,
+            107,
+            149
+          ]
+        },
+        "65": {
+          "name": "file cabinet",
+          "color": [
+            160,
+            89,
+            237
+          ]
+        },
+        "66": {
+          "name": "fan",
+          "color": [
+            227,
+            56,
+            125
+          ]
+        },
+        "67": {
+          "name": "laptop",
+          "color": [
+            169,
+            143,
+            81
+          ]
+        },
+        "68": {
+          "name": "shower",
+          "color": [
+            42,
+            143,
+            20
+          ]
+        },
+        "69": {
+          "name": "paper",
+          "color": [
+            25,
+            160,
+            151
+          ]
+        },
+        "70": {
+          "name": "person",
+          "color": [
+            82,
+            75,
+            227
+          ]
+        },
+        "71": {
+          "name": "paper towel dispenser",
+          "color": [
+            253,
+            59,
+            222
+          ]
+        },
+        "72": {
+          "name": "oven",
+          "color": [
+            240,
+            130,
+            89
+          ]
+        },
+        "73": {
+          "name": "blinds",
+          "color": [
+            123,
+            172,
+            47
+          ]
+        },
+        "74": {
+          "name": "rack",
+          "color": [
+            71,
+            194,
+            133
+          ]
+        },
+        "75": {
+          "name": "plate",
+          "color": [
+            24,
+            94,
+            205
+          ]
+        },
+        "76": {
+          "name": "blackboard",
+          "color": [
+            134,
+            16,
+            179
+          ]
+        },
+        "77": {
+          "name": "piano",
+          "color": [
+            159,
+            32,
+            52
+          ]
+        },
+        "78": {
+          "name": "suitcase",
+          "color": [
+            213,
+            208,
+            88
+          ]
+        },
+        "79": {
+          "name": "rail",
+          "color": [
+            64,
+            158,
+            70
+          ]
+        },
+        "80": {
+          "name": "radiator",
+          "color": [
+            18,
+            163,
+            194
+          ]
+        },
+        "81": {
+          "name": "recycling bin",
+          "color": [
+            65,
+            29,
+            153
+          ]
+        },
+        "82": {
+          "name": "container",
+          "color": [
+            177,
+            10,
+            109
+          ]
+        },
+        "83": {
+          "name": "wardrobe",
+          "color": [
+            152,
+            83,
+            7
+          ]
+        },
+        "84": {
+          "name": "soap dispenser",
+          "color": [
+            83,
+            175,
+            30
+          ]
+        },
+        "85": {
+          "name": "telephone",
+          "color": [
+            18,
+            199,
+            153
+          ]
+        },
+        "86": {
+          "name": "bucket",
+          "color": [
+            61,
+            81,
+            208
+          ]
+        },
+        "87": {
+          "name": "clock",
+          "color": [
+            213,
+            85,
+            216
+          ]
+        },
+        "88": {
+          "name": "stand",
+          "color": [
+            170,
+            53,
+            42
+          ]
+        },
+        "89": {
+          "name": "light",
+          "color": [
+            161,
+            192,
+            38
+          ]
+        },
+        "90": {
+          "name": "laundry basket",
+          "color": [
+            23,
+            241,
+            91
+          ]
+        },
+        "91": {
+          "name": "pipe",
+          "color": [
+            12,
+            103,
+            170
+          ]
+        },
+        "92": {
+          "name": "clothes dryer",
+          "color": [
+            151,
+            41,
+            245
+          ]
+        },
+        "93": {
+          "name": "guitar",
+          "color": [
+            133,
+            51,
+            80
+          ]
+        },
+        "94": {
+          "name": "toilet paper holder",
+          "color": [
+            184,
+            162,
+            91
+          ]
+        },
+        "95": {
+          "name": "seat",
+          "color": [
+            50,
+            138,
+            38
+          ]
+        },
+        "96": {
+          "name": "speaker",
+          "color": [
+            31,
+            237,
+            236
+          ]
+        },
+        "97": {
+          "name": "column",
+          "color": [
+            39,
+            19,
+            208
+          ]
+        },
+        "98": {
+          "name": "bicycle",
+          "color": [
+            223,
+            27,
+            180
+          ]
+        },
+        "99": {
+          "name": "ladder",
+          "color": [
+            254,
+            141,
+            85
+          ]
+        },
+        "100": {
+          "name": "bathroom stall",
+          "color": [
+            97,
+            144,
+            39
+          ]
+        },
+        "101": {
+          "name": "shower wall",
+          "color": [
+            106,
+            231,
+            176
+          ]
+        },
+        "102": {
+          "name": "cup",
+          "color": [
+            12,
+            61,
+            162
+          ]
+        },
+        "103": {
+          "name": "jacket",
+          "color": [
+            124,
+            66,
+            140
+          ]
+        },
+        "104": {
+          "name": "storage bin",
+          "color": [
+            137,
+            66,
+            73
+          ]
+        },
+        "105": {
+          "name": "coffee maker",
+          "color": [
+            250,
+            253,
+            26
+          ]
+        },
+        "106": {
+          "name": "dishwasher",
+          "color": [
+            55,
+            191,
+            73
+          ]
+        },
+        "107": {
+          "name": "paper towel roll",
+          "color": [
+            60,
+            126,
+            146
+          ]
+        },
+        "108": {
+          "name": "machine",
+          "color": [
+            153,
+            108,
+            234
+          ]
+        },
+        "109": {
+          "name": "mat",
+          "color": [
+            184,
+            58,
+            125
+          ]
+        },
+        "110": {
+          "name": "windowsill",
+          "color": [
+            135,
+            84,
+            14
+          ]
+        },
+        "111": {
+          "name": "bar",
+          "color": [
+            139,
+            248,
+            91
+          ]
+        },
+        "112": {
+          "name": "toaster",
+          "color": [
+            53,
+            200,
+            172
+          ]
+        },
+        "113": {
+          "name": "bulletin board",
+          "color": [
+            63,
+            69,
+            134
+          ]
+        },
+        "114": {
+          "name": "ironing board",
+          "color": [
+            190,
+            75,
+            186
+          ]
+        },
+        "115": {
+          "name": "fireplace",
+          "color": [
+            127,
+            63,
+            52
+          ]
+        },
+        "116": {
+          "name": "soap dish",
+          "color": [
+            141,
+            182,
+            25
+          ]
+        },
+        "117": {
+          "name": "kitchen counter",
+          "color": [
+            56,
+            144,
+            89
+          ]
+        },
+        "118": {
+          "name": "doorframe",
+          "color": [
+            64,
+            160,
+            250
+          ]
+        },
+        "119": {
+          "name": "toilet paper dispenser",
+          "color": [
+            182,
+            86,
+            245
+          ]
+        },
+        "120": {
+          "name": "mini fridge",
+          "color": [
+            139,
+            18,
+            53
+          ]
+        },
+        "121": {
+          "name": "fire extinguisher",
+          "color": [
+            134,
+            120,
+            54
+          ]
+        },
+        "122": {
+          "name": "ball",
+          "color": [
+            49,
+            165,
+            42
+          ]
+        },
+        "123": {
+          "name": "hat",
+          "color": [
+            51,
+            128,
+            133
+          ]
+        },
+        "124": {
+          "name": "shower curtain rod",
+          "color": [
+            44,
+            21,
+            163
+          ]
+        },
+        "125": {
+          "name": "water cooler",
+          "color": [
+            232,
+            93,
+            193
+          ]
+        },
+        "126": {
+          "name": "paper cutter",
+          "color": [
+            176,
+            102,
+            54
+          ]
+        },
+        "127": {
+          "name": "tray",
+          "color": [
+            116,
+            217,
+            17
+          ]
+        },
+        "128": {
+          "name": "shower door",
+          "color": [
+            54,
+            209,
+            150
+          ]
+        },
+        "129": {
+          "name": "pillar",
+          "color": [
+            60,
+            99,
+            204
+          ]
+        },
+        "130": {
+          "name": "ledge",
+          "color": [
+            129,
+            43,
+            144
+          ]
+        },
+        "131": {
+          "name": "toaster oven",
+          "color": [
+            252,
+            100,
+            106
+          ]
+        },
+        "132": {
+          "name": "mouse",
+          "color": [
+            187,
+            196,
+            73
+          ]
+        },
+        "133": {
+          "name": "toilet seat cover dispenser",
+          "color": [
+            13,
+            158,
+            40
+          ]
+        },
+        "134": {
+          "name": "furniture",
+          "color": [
+            52,
+            122,
+            152
+          ]
+        },
+        "135": {
+          "name": "cart",
+          "color": [
+            128,
+            76,
+            202
+          ]
+        },
+        "136": {
+          "name": "storage container",
+          "color": [
+            187,
+            50,
+            115
+          ]
+        },
+        "137": {
+          "name": "scale",
+          "color": [
+            180,
+            141,
+            71
+          ]
+        },
+        "138": {
+          "name": "tissue box",
+          "color": [
+            77,
+            208,
+            35
+          ]
+        },
+        "139": {
+          "name": "light switch",
+          "color": [
+            72,
+            183,
+            168
+          ]
+        },
+        "140": {
+          "name": "crate",
+          "color": [
+            97,
+            99,
+            203
+          ]
+        },
+        "141": {
+          "name": "power outlet",
+          "color": [
+            172,
+            22,
+            158
+          ]
+        },
+        "142": {
+          "name": "decoration",
+          "color": [
+            155,
+            64,
+            40
+          ]
+        },
+        "143": {
+          "name": "sign",
+          "color": [
+            118,
+            159,
+            30
+          ]
+        },
+        "144": {
+          "name": "projector",
+          "color": [
+            69,
+            252,
+            148
+          ]
+        },
+        "145": {
+          "name": "closet door",
+          "color": [
+            45,
+            103,
+            173
+          ]
+        },
+        "146": {
+          "name": "vacuum cleaner",
+          "color": [
+            111,
+            38,
+            149
+          ]
+        },
+        "147": {
+          "name": "candle",
+          "color": [
+            184,
+            9,
+            49
+          ]
+        },
+        "148": {
+          "name": "plunger",
+          "color": [
+            188,
+            174,
+            67
+          ]
+        },
+        "149": {
+          "name": "stuffed animal",
+          "color": [
+            53,
+            206,
+            53
+          ]
+        },
+        "150": {
+          "name": "headphones",
+          "color": [
+            97,
+            235,
+            252
+          ]
+        },
+        "151": {
+          "name": "dish rack",
+          "color": [
+            66,
+            32,
+            182
+          ]
+        },
+        "152": {
+          "name": "broom",
+          "color": [
+            236,
+            114,
+            195
+          ]
+        },
+        "153": {
+          "name": "guitar case",
+          "color": [
+            241,
+            154,
+            83
+          ]
+        },
+        "154": {
+          "name": "range hood",
+          "color": [
+            133,
+            240,
+            52
+          ]
+        },
+        "155": {
+          "name": "dustpan",
+          "color": [
+            16,
+            205,
+            144
+          ]
+        },
+        "156": {
+          "name": "hair dryer",
+          "color": [
+            75,
+            101,
+            198
+          ]
+        },
+        "157": {
+          "name": "water bottle",
+          "color": [
+            237,
+            95,
+            251
+          ]
+        },
+        "158": {
+          "name": "handicap bar",
+          "color": [
+            191,
+            52,
+            49
+          ]
+        },
+        "159": {
+          "name": "purse",
+          "color": [
+            227,
+            254,
+            54
+          ]
+        },
+        "160": {
+          "name": "vent",
+          "color": [
+            49,
+            206,
+            87
+          ]
+        },
+        "161": {
+          "name": "shower floor",
+          "color": [
+            48,
+            113,
+            150
+          ]
+        },
+        "162": {
+          "name": "water pitcher",
+          "color": [
+            125,
+            73,
+            182
+          ]
+        },
+        "163": {
+          "name": "mailbox",
+          "color": [
+            229,
+            32,
+            114
+          ]
+        },
+        "164": {
+          "name": "bowl",
+          "color": [
+            158,
+            119,
+            28
+          ]
+        },
+        "165": {
+          "name": "paper bag",
+          "color": [
+            60,
+            205,
+            27
+          ]
+        },
+        "166": {
+          "name": "alarm clock",
+          "color": [
+            18,
+            215,
+            201
+          ]
+        },
+        "167": {
+          "name": "music stand",
+          "color": [
+            79,
+            76,
+            153
+          ]
+        },
+        "168": {
+          "name": "projector screen",
+          "color": [
+            134,
+            13,
+            116
+          ]
+        },
+        "169": {
+          "name": "divider",
+          "color": [
+            192,
+            97,
+            63
+          ]
+        },
+        "170": {
+          "name": "laundry detergent",
+          "color": [
+            108,
+            163,
+            18
+          ]
+        },
+        "171": {
+          "name": "bathroom counter",
+          "color": [
+            95,
+            220,
+            156
+          ]
+        },
+        "172": {
+          "name": "object",
+          "color": [
+            98,
+            141,
+            208
+          ]
+        },
+        "173": {
+          "name": "bathroom vanity",
+          "color": [
+            144,
+            19,
+            193
+          ]
+        },
+        "174": {
+          "name": "closet wall",
+          "color": [
+            166,
+            36,
+            57
+          ]
+        },
+        "175": {
+          "name": "laundry hamper",
+          "color": [
+            212,
+            202,
+            34
+          ]
+        },
+        "176": {
+          "name": "bathroom stall door",
+          "color": [
+            23,
+            206,
+            34
+          ]
+        },
+        "177": {
+          "name": "ceiling light",
+          "color": [
+            91,
+            211,
+            236
+          ]
+        },
+        "178": {
+          "name": "trash bin",
+          "color": [
+            79,
+            55,
+            137
+          ]
+        },
+        "179": {
+          "name": "dumbbell",
+          "color": [
+            182,
+            19,
+            117
+          ]
+        },
+        "180": {
+          "name": "stair rail",
+          "color": [
+            134,
+            76,
+            14
+          ]
+        },
+        "181": {
+          "name": "tube",
+          "color": [
+            87,
+            185,
+            28
+          ]
+        },
+        "182": {
+          "name": "bathroom cabinet",
+          "color": [
+            82,
+            224,
+            187
+          ]
+        },
+        "183": {
+          "name": "cd case",
+          "color": [
+            92,
+            110,
+            214
+          ]
+        },
+        "184": {
+          "name": "closet rod",
+          "color": [
+            168,
+            80,
+            171
+          ]
+        },
+        "185": {
+          "name": "coffee kettle",
+          "color": [
+            197,
+            63,
+            51
+          ]
+        },
+        "186": {
+          "name": "structure",
+          "color": [
+            175,
+            199,
+            77
+          ]
+        },
+        "187": {
+          "name": "shower head",
+          "color": [
+            62,
+            180,
+            98
+          ]
+        },
+        "188": {
+          "name": "keyboard piano",
+          "color": [
+            8,
+            91,
+            150
+          ]
+        },
+        "189": {
+          "name": "case of water bottles",
+          "color": [
+            77,
+            15,
+            130
+          ]
+        },
+        "190": {
+          "name": "coat rack",
+          "color": [
+            154,
+            65,
+            96
+          ]
+        },
+        "191": {
+          "name": "storage organizer",
+          "color": [
+            197,
+            152,
+            11
+          ]
+        },
+        "192": {
+          "name": "folded chair",
+          "color": [
+            59,
+            155,
+            45
+          ]
+        },
+        "193": {
+          "name": "fire alarm",
+          "color": [
+            12,
+            147,
+            145
+          ]
+        },
+        "194": {
+          "name": "power strip",
+          "color": [
+            54,
+            35,
+            219
+          ]
+        },
+        "195": {
+          "name": "calendar",
+          "color": [
+            210,
+            73,
+            181
+          ]
+        },
+        "196": {
+          "name": "poster",
+          "color": [
+            221,
+            124,
+            77
+          ]
+        },
+        "197": {
+          "name": "potted plant",
+          "color": [
+            149,
+            214,
+            66
+          ]
+        },
+        "198": {
+          "name": "luggage",
+          "color": [
+            72,
+            185,
+            134
+          ]
+        },
+        "199": {
+          "name": "mattress",
+          "color": [
+            42,
+            94,
+            198
+          ]
+        }
+      }
+    },
+    "instance": {
+      "name": "Instance",
+      "classes": {
+        "-1": {
+          "name": "unlabeled",
+          "color": [
+            95,
+            99,
+            108
+          ]
+        }
+      }
+    }
+  }
+}

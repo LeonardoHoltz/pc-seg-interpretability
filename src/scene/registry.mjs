@@ -8,7 +8,7 @@
  */
 import { readdirSync, statSync, existsSync, readFileSync } from "node:fs";
 import { join, relative, sep, extname, basename } from "node:path";
-import { SCENES_DIR, CACHE_DIR } from "../paths.mjs";
+import { SCENES_DIR, CACHE_DIR, CONFIG_DIR } from "../paths.mjs";
 import { readCloudHeader, isNpyScene, NPY_REQUIRED } from "../io/cloud.mjs";
 
 /** Scene ids are POSIX-style relative paths without the .pcd extension. */
@@ -50,22 +50,43 @@ function readJsonIfPresent(path) {
 }
 
 /**
+ * The `classes.json` files that may describe a scene, under one root, in
+ * increasing priority. `root` is either config/ or scenes/ -- the two are
+ * searched with identical rules, config/ being a shadow tree of scenes/.
+ */
+function sidecarChain(root, scenePath) {
+  const isDir = isNpyScene(scenePath);
+  const dir = join(root, relative(SCENES_DIR, isDir ? scenePath : join(scenePath, "..")));
+  const chain = [];
+  for (let d = dir; d.startsWith(root); d = join(d, "..")) {
+    chain.unshift(join(d, "classes.json"));
+    if (d === root) break;
+  }
+  if (!isDir) {
+    chain.push(join(root, relative(SCENES_DIR, scenePath)).replace(/\.pcd$/i, ".classes.json"));
+  }
+  return chain;
+}
+
+/**
  * Class names and colours for a scene.
  *
- * A `classes.json` in any folder between scenes/ and the scene applies to
+ * A `classes.json` in any folder between the root and the scene applies to
  * everything beneath it, so a whole dataset is described once. Closer files win,
  * and a per-scene `<scene>.classes.json` (or `classes.json` inside a directory
  * scene) wins over all of them. Per-field entries merge, so a dataset config can
  * name the classes while one scene overrides a single field.
+ *
+ * Both config/ and scenes/ are searched, in that order, with the same rules.
+ * Checked-in dataset descriptions therefore live in config/ while scenes/ stays
+ * pure bulk data -- and a file dropped next to the points still wins, which
+ * keeps a one-off scene easy to annotate without touching the repo's config.
  */
 export function readSidecar(scenePath) {
-  const dir = isNpyScene(scenePath) ? scenePath : join(scenePath, "..");
-  const chain = [];
-  for (let d = dir; d.startsWith(SCENES_DIR); d = join(d, "..")) {
-    chain.unshift(join(d, "classes.json"));
-    if (d === SCENES_DIR) break;
-  }
-  if (!isNpyScene(scenePath)) chain.push(scenePath.replace(/\.pcd$/i, ".classes.json"));
+  const chain = [
+    ...sidecarChain(CONFIG_DIR, scenePath),
+    ...sidecarChain(SCENES_DIR, scenePath),
+  ];
 
   let merged = null;
   for (const path of chain) {
