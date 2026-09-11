@@ -17,9 +17,14 @@ For how the code is organised and why, see [ARCHITECTURE.md](ARCHITECTURE.md).
 ## Quick start
 
 ```bash
+npm install              # Install dependencies
 npm run build-viewer     # clone + build Potree, vendor it into web/vendor/  (once)
 npm run demo             # generate a synthetic segmented street scene
 npm run serve            # http://127.0.0.1:8080
+
+# Mockup python service
+# Use any python with numpy installed or use pixi install
+python examples/segmentation_service.py --port 8500
 ```
 
 `npm run setup` does the first two together.
