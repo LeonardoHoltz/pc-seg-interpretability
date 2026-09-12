@@ -13,6 +13,7 @@ import { readOctree } from "../octree/read.mjs";
 import { encodeArrays, decodeArrays } from "./npbuffer.mjs";
 import { cacheDirFor } from "../scene/registry.mjs";
 import { rewriteSceneWithAttributes } from "../scene/attributes.mjs";
+import { config } from "../config.mjs";
 
 export const SALIENCY_ATTRIBUTE = "saliency";
 
@@ -81,7 +82,7 @@ function prepare(sceneId, instanceId, fields) {
 export async function runSaliency(sceneId, opts = {}) {
   const {
     endpoint, instanceId, classValue = null,
-    fields = null, timeoutMs = 30 * 60 * 1000, onProgress = () => {},
+    fields = null, timeoutMs = config.inference.timeouts.saliency, onProgress = () => {},
   } = opts;
 
   if (!endpoint) throw new Error("no inference endpoint configured");

@@ -8,13 +8,13 @@
  */
 import { readdirSync, statSync, existsSync, readFileSync } from "node:fs";
 import { join, relative, sep, extname, basename } from "node:path";
-import { SCENES_DIR, CACHE_DIR, CONFIG_DIR } from "../paths.mjs";
+import { CACHE_DIR, CONFIG_DIR, DATASETS } from "../paths.mjs";
 import { readCloudHeader, isNpyScene, NPY_REQUIRED } from "../io/cloud.mjs";
 
 /** Scene ids are POSIX-style relative paths without the .pcd extension. */
 export const idToPosix = (id) => id.split("/").join(sep);
 
-function walk(dir, out = []) {
+function walk(dir, out = [], stopAt = new Set()) {
   let entries;
   try {
     entries = readdirSync(dir, { withFileTypes: true });
@@ -29,10 +29,26 @@ function walk(dir, out = []) {
   }
   for (const e of entries) {
     const full = join(dir, e.name);
-    if (e.isDirectory()) walk(full, out);
+    // A nested dataset declares its own root; it belongs to that dataset, not
+    // to whichever one happens to sit above it on disk.
+    if (stopAt.has(full)) continue;
+    if (e.isDirectory()) walk(full, out, stopAt);
     else if (e.isFile() && extname(e.name).toLowerCase() === ".pcd") out.push(full);
   }
   return out;
+}
+
+/** Joins an id prefix and a path within a dataset into a scene id. */
+const joinId = (prefix, rel) => (prefix ? `${prefix}/${rel}` : rel);
+
+/** The dataset a scene id belongs to: the one with the longest matching prefix. */
+export function datasetForId(id) {
+  let best = null;
+  for (const d of DATASETS) {
+    if (d.prefix && id !== d.prefix && !id.startsWith(`${d.prefix}/`)) continue;
+    if (!best || d.prefix.length > best.prefix.length) best = d;
+  }
+  return best;
 }
 
 export function cacheDirFor(id) {
@@ -54,17 +70,14 @@ function readJsonIfPresent(path) {
  * increasing priority. `root` is either config/ or scenes/ -- the two are
  * searched with identical rules, config/ being a shadow tree of scenes/.
  */
-function sidecarChain(root, scenePath) {
-  const isDir = isNpyScene(scenePath);
-  const dir = join(root, relative(SCENES_DIR, isDir ? scenePath : join(scenePath, "..")));
+function sidecarChain(root, rel, isDir) {
+  const dir = join(root, isDir ? rel : join(rel, ".."));
   const chain = [];
   for (let d = dir; d.startsWith(root); d = join(d, "..")) {
     chain.unshift(join(d, "classes.json"));
     if (d === root) break;
   }
-  if (!isDir) {
-    chain.push(join(root, relative(SCENES_DIR, scenePath)).replace(/\.pcd$/i, ".classes.json"));
-  }
+  if (!isDir) chain.push(join(root, `${rel}.classes.json`));
   return chain;
 }
 
@@ -82,10 +95,16 @@ function sidecarChain(root, scenePath) {
  * pure bulk data -- and a file dropped next to the points still wins, which
  * keeps a one-off scene easy to annotate without touching the repo's config.
  */
-export function readSidecar(scenePath) {
+export function readSidecar(scenePath, id = idForPath(scenePath)) {
+  const isDir = isNpyScene(scenePath);
+  const dataset = datasetForId(id) ?? DATASETS[0];
+  // Within config/ a scene is addressed by its id, so a dataset keeps its
+  // descriptions when its points move to another disk. Within the dataset's own
+  // root it is addressed by the path, so a classes.json can sit by the points.
+  const withinDataset = relative(dataset.path, isDir ? scenePath : scenePath.replace(/\.pcd$/i, ""));
   const chain = [
-    ...sidecarChain(CONFIG_DIR, scenePath),
-    ...sidecarChain(SCENES_DIR, scenePath),
+    ...sidecarChain(CONFIG_DIR, idToPosix(id), isDir),
+    ...sidecarChain(dataset.path, withinDataset, isDir),
   ];
 
   let merged = null;
@@ -112,16 +131,34 @@ function directorySize(dir) {
   return { bytes, modified };
 }
 
-export function describeScene(scenePath) {
+/** The dataset whose root contains this path: the deepest one that does. */
+function datasetForPath(scenePath) {
+  let best = null;
+  for (const d of DATASETS) {
+    if (scenePath !== d.path && !scenePath.startsWith(d.path + sep)) continue;
+    if (!best || d.path.length > best.path.length) best = d;
+  }
+  return best;
+}
+
+/** Scene id for a path on disk: the dataset's prefix plus the path inside it. */
+export function idForPath(scenePath, dataset = datasetForPath(scenePath)) {
+  const ds = dataset ?? DATASETS[0];
+  const rel = relative(ds.path, scenePath).split(sep).join("/").replace(/\.pcd$/i, "");
+  return joinId(ds.prefix, rel);
+}
+
+export function describeScene(scenePath, dataset = datasetForPath(scenePath)) {
   const isDir = isNpyScene(scenePath);
-  const rel = relative(SCENES_DIR, scenePath);
-  const id = rel.split(sep).join("/").replace(/\.pcd$/i, "");
+  const id = idForPath(scenePath, dataset);
+  const rel = relative((dataset ?? DATASETS[0]).path, scenePath);
   const st = isDir ? directorySize(scenePath) : statSync(scenePath);
 
   const scene = {
     id,
+    dataset: (dataset ?? DATASETS[0]).name,
     name: isDir ? basename(scenePath) : basename(scenePath, extname(scenePath)),
-    folder: rel.split(sep).slice(0, isDir ? -1 : -1).join("/"),
+    folder: id.split("/").slice(0, -1).join("/"),
     file: rel.split(sep).join("/"),
     bytes: st.bytes ?? st.size,
     modified: st.modified ?? st.mtimeMs,
@@ -160,15 +197,27 @@ export function describeScene(scenePath) {
 }
 
 export function listScenes() {
-  return walk(SCENES_DIR)
-    .map(describeScene)
-    .sort((a, b) => a.id.localeCompare(b.id));
+  // Roots of other datasets, so a dataset nested inside another is walked once,
+  // by the dataset that declares it.
+  const roots = new Set(DATASETS.map((d) => d.path));
+  const out = [];
+  for (const dataset of DATASETS) {
+    const nested = new Set([...roots].filter((r) => r !== dataset.path));
+    for (const p of walk(dataset.path, [], nested)) out.push(describeScene(p, dataset));
+  }
+  return out.sort((a, b) => a.id.localeCompare(b.id));
 }
 
 export function resolveScene(id) {
-  const base = join(SCENES_DIR, idToPosix(id));
-  // Keep the id from escaping the scenes directory.
-  if (!base.startsWith(SCENES_DIR)) throw new Error(`invalid scene id: ${id}`);
+  const dataset = datasetForId(id);
+  if (!dataset) throw new Error(`no dataset owns scene id: ${id}`);
+
+  const within = dataset.prefix ? id.slice(dataset.prefix.length + 1) : id;
+  const base = join(dataset.path, idToPosix(within));
+  // Keep the id from escaping its dataset root.
+  if (base !== dataset.path && !base.startsWith(dataset.path + sep)) {
+    throw new Error(`invalid scene id: ${id}`);
+  }
 
   const asPcd = `${base}.pcd`;
   if (existsSync(asPcd)) return asPcd;
@@ -179,11 +228,12 @@ export function resolveScene(id) {
 // CLI: `npm run scan`
 if (import.meta.url === `file://${process.argv[1]}`) {
   const scenes = listScenes();
+  const roots = DATASETS.map((d) => `${d.name} -> ${d.path}`).join("\n    ");
   if (scenes.length === 0) {
-    console.log(`No .pcd files found under ${SCENES_DIR}`);
+    console.log(`No scenes found. Dataset roots:\n    ${roots}`);
     console.log("Drop some in, or run `npm run demo` to generate a sample scene.");
   } else {
-    console.log(`${scenes.length} scene(s) mapped under ${SCENES_DIR}:\n`);
+    console.log(`${scenes.length} scene(s) mapped:\n    ${roots}\n`);
     for (const s of scenes) {
       const mb = (s.bytes / 1048576).toFixed(1);
       const pts = s.points ? s.points.toLocaleString() : "?";

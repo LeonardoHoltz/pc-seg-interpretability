@@ -16,6 +16,7 @@ import { rewriteSceneWithAttributes } from "../scene/attributes.mjs";
 import { encodeArrays, decodeArrays } from "./npbuffer.mjs";
 import { classColor, UNLABELED_COLOR, UNLABELED_NAMES } from "../scene/palette.mjs";
 import { cacheDirFor } from "../scene/registry.mjs";
+import { config } from "../config.mjs";
 
 /** Name of the attribute the returned labels are written into. */
 export const PREDICTION_ATTRIBUTE = "prediction";
@@ -117,7 +118,7 @@ function buildClassTable(values, names) {
  * @param endpoint  the service's URL
  */
 export async function runSegmentation(sceneId, endpoint, options = {}) {
-  const { fields = null, timeoutMs = 15 * 60 * 1000, onProgress = () => {} } = options;
+  const { fields = null, timeoutMs = config.inference.timeouts.predict, onProgress = () => {} } = options;
   if (!endpoint) throw new Error("no inference endpoint configured");
 
   onProgress({ phase: "reading", progress: 0.05, message: "Reading the scene" });

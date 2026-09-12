@@ -1,28 +1,35 @@
-/** Directories the application works with. */
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+/**
+ * Directories the application works with.
+ *
+ * These are now views onto `config/app.json` (see config.mjs for the file
+ * format and the flag/env/file precedence). They stay exported as constants
+ * because most of the code only ever needs the resolved directory.
+ */
+import { join } from "node:path";
+import { config, ROOT } from "./config.mjs";
 
-export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-
-const envDir = (name, fallback) =>
-  process.env[name] ? resolve(process.env[name]) : fallback;
+export { ROOT };
 
 /**
  * Where scenes are *mapped* from. The registry only reads PCD headers here, so
  * listing a folder of large scans stays instant -- nothing is loaded until a
- * scene is actually opened.
+ * scene is actually opened. Datasets may declare roots of their own outside
+ * this one; see config.datasets.
  */
-export const SCENES_DIR = envDir("PCIT_SCENES_DIR", join(ROOT, "scenes"));
+export const SCENES_DIR = config.paths.scenes;
 
 /** Converted Potree octrees, one subdirectory per scene. */
-export const CACHE_DIR = envDir("PCIT_CACHE_DIR", join(ROOT, "cache"));
+export const CACHE_DIR = config.paths.cache;
 
 /**
- * Checked-in dataset descriptions: class names and colours, as a shadow tree of
- * SCENES_DIR. Scenes are bulk data and stay untracked; what a label *means* is
- * part of the repo, so it lives here instead of next to the points.
+ * Checked-in dataset descriptions: class names and colours, keyed by scene id,
+ * plus app.json itself. Scenes are bulk data and stay untracked; what a label
+ * *means* is part of the repo, so it lives here instead of next to the points.
  */
-export const CONFIG_DIR = envDir("PCIT_CONFIG_DIR", join(ROOT, "config"));
+export const CONFIG_DIR = config.paths.config;
+
+/** Declared dataset roots, each an id namespace. */
+export const DATASETS = config.datasets;
 
 /** Static front-end assets. */
 export const WEB_DIR = join(ROOT, "web");

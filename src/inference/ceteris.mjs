@@ -21,6 +21,7 @@ import { join } from "node:path";
 import { readOctree } from "../octree/read.mjs";
 import { encodeArrays, decodeArrays } from "./npbuffer.mjs";
 import { cacheDirFor } from "../scene/registry.mjs";
+import { config } from "../config.mjs";
 
 /** Reads the scene once and lays out the arrays the service expects. */
 function prepare(sceneId, fields) {
@@ -148,7 +149,7 @@ export async function runCeterisParibus(sceneId, opts = {}) {
   const {
     endpoint, instanceId, classValue, heights,
     direction = [0, 0, 1],
-    fields = null, timeoutMs = 30 * 60 * 1000, onProgress = () => {},
+    fields = null, timeoutMs = config.inference.timeouts.ceteris, onProgress = () => {},
   } = opts;
 
   if (!endpoint) throw new Error("no inference endpoint configured");

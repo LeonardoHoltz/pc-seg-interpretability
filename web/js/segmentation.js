@@ -39,9 +39,19 @@ export function createSegmentation({
   try {
     state.endpoint = localStorage.getItem(ENDPOINT_KEY) ?? "";
   } catch { /* private browsing */ }
-  if (!state.endpoint) state.endpoint = "http://127.0.0.1:8500/";
 
   const api = { state };
+
+  // The default endpoint lives in config/app.json, not here, so the deployment
+  // decides where the service is. A value the user typed is theirs and always
+  // wins; this only fills an empty field, and re-renders if the tab is already
+  // on screen by the time the config arrives.
+  fetchJson("/api/config").then((cfg) => {
+    if (!state.endpoint && cfg?.inference?.endpoint) {
+      state.endpoint = cfg.inference.endpoint;
+      if ($("#segmentation-body")?.childElementCount) render();
+    }
+  }).catch(() => { /* the field is editable; a default is a convenience */ });
 
   // ---------------------------------------------------------------- render
   function render() {

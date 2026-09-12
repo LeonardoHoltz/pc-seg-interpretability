@@ -1,0 +1,39 @@
+{
+  "server": {
+    "host": "127.0.0.1",
+    "port": 8080
+  },
+
+  "paths": {
+    "scenes": "scenes",
+    "cache": "cache",
+    "config": "config"
+  },
+
+  "datasets": {
+    "demo": {
+      "path": "scenes",
+      "prefix": "",
+      "description": "Synthetic street scenes from `npm run demo`"
+    },
+    "scannet_subset": {
+      "path": "scenes/scannet_subset",
+      "primaryField": "segment20",
+      "description": "ScanNet v2 indoor scans, Pointcept preprocessing"
+    }
+  },
+
+  "inference": {
+    "endpoint": "http://127.0.0.1:8500/",
+    "timeouts": {
+      "predict": 900000,
+      "saliency": 1800000,
+      "ceteris": 1800000
+    }
+  },
+
+  "conversion": {
+    "gridSize": 128,
+    "instances": true
+  }
+}

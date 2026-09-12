@@ -39,6 +39,76 @@ subfolders are fine — and hit ⟳ in the scene browser.
 
 ---
 
+## Configuration
+
+`config/app.json` holds the settings that would otherwise be literals in the source: where
+the server listens, where datasets live, the default inference endpoint, conversion
+defaults and request timeouts.
+
+```jsonc
+{
+  "server":  { "host": "127.0.0.1", "port": 8080 },
+  "paths":   { "scenes": "scenes", "cache": "cache", "config": "config" },
+
+  "datasets": {
+    "demo":           { "path": "scenes", "prefix": "" },
+    "scannet_subset": { "path": "scenes/scannet_subset", "primaryField": "segment20" }
+  },
+
+  "inference": {
+    "endpoint": "http://127.0.0.1:8500/",
+    "timeouts": { "predict": 900000, "saliency": 1800000, "ceteris": 1800000 }
+  },
+
+  "conversion": { "gridSize": 128, "instances": true }
+}
+```
+
+Every key is optional — anything missing falls back to a built-in default, and deleting the
+file entirely leaves the app working exactly as before. Values resolve highest-first:
+
+```
+--port 9000          CLI flag
+PCIT_PORT=9000       environment
+config/app.json      the file
+                     built-in default
+```
+
+so one value can be overridden for a single run without editing anything. The recognised
+variables are `PCIT_HOST`, `PCIT_PORT`, `PCIT_SCENES_DIR`, `PCIT_CACHE_DIR`,
+`PCIT_CONFIG_DIR`, `PCIT_INFERENCE_ENDPOINT` and `PCIT_GRID_SIZE`. Relative paths resolve
+against the repo root; absolute ones are used as given.
+
+### Datasets
+
+A dataset is a **declared root**, which is what lets a large collection stay on the disk it
+already lives on:
+
+```jsonc
+"datasets": {
+  "demo":    { "path": "scenes", "prefix": "" },
+  "scannet": { "path": "/mnt/data/scannet", "primaryField": "segment20" }
+}
+```
+
+Each dataset owns an **id namespace**: a scene's id is its `prefix` (defaulting to the
+dataset name) plus its path inside the root, so `/mnt/data/scannet/val/scene0011_00`
+becomes `scannet/val/scene0011_00`. Because the id does not mention the root, a dataset can
+be moved to another disk without invalidating a single `cache/` entry — only `path` changes.
+`prefix: ""` puts a dataset's scenes at the top level, which is how the bundled demo scenes
+keep bare ids like `demo_street_binary`.
+
+A dataset nested inside another's root belongs to the one that declares it, so `scenes/` and
+`scenes/scannet_subset/` can both be datasets without the scans being listed twice.
+`primaryField` picks the class field for datasets shipping several label sets, exactly as in
+a `classes.json`. With no `datasets` block at all, the whole scenes directory is one unnamed
+dataset — the original behaviour.
+
+Class names and colours are a separate, per-dataset concern; see
+[Segmentation fields](#segmentation-fields) for `config/<id>/classes.json`.
+
+---
+
 ## Colouring
 
 The converter inspects every field and sorts it into one of three buckets:
@@ -64,18 +134,20 @@ LUT. The panel offers a **“Make *field* the class field”** button that recon
 scene so a different field takes that slot.
 
 Class order, names and colours can be pinned with a config file. These live under
-`config/`, a **shadow tree of `scenes/`**: same layout, same naming rules, but tracked in
-git, because what a label *means* is part of the repo while the points are bulk data. A
-`classes.json` in any folder between the root and the scene applies to **everything
-beneath it**, so a whole dataset is described once:
+`config/`, keyed by **scene id** — so for the default single-root setup it mirrors the
+`scenes/` layout, and for a dataset mounted elsewhere it follows the dataset's `prefix`
+rather than its path on disk. They are tracked in git, because what a label *means* is part
+of the repo while the points are bulk data. A `classes.json` at any level applies to
+**everything beneath it**, so a whole dataset is described once:
 
 ```
 config/scannet_subset/classes.json      <- applies to all 12 scenes below
 config/my_scan.classes.json             <- applies to that one scene
 ```
 
-`scenes/` is searched the same way afterwards, so a `classes.json` dropped next to the
-points still wins — handy for a one-off scan you do not want to describe in the repo.
+The dataset's own root is searched the same way afterwards, so a `classes.json` dropped
+next to the points still wins — handy for a one-off scan you do not want to describe in the
+repo, and it travels with the data if the dataset is on a shared mount.
 
 Closer files win over further ones and a per-scene sidecar wins over all of them, merging
 field by field — so a dataset config can name the classes while one scene overrides a
@@ -534,13 +606,16 @@ point. Run it after touching the converter.
 
 ```
 scenes/          your scenes: .pcd files, or folders of .npy arrays  (untracked)
-config/          classes.json dataset configs, mirroring the scenes/ layout
+config/
+  app.json       server, dataset roots, inference endpoint, conversion defaults
+  <id>/classes.json   class names + colours, keyed by scene id
 cache/           generated octrees, one folder per scene                (untracked)
 examples/        reference segmentation service (documents the wire format)
 tools/           viewer build, demo scenes, octree verifier
 
 src/
   server.mjs     HTTP server: the API, SSE progress, Range-capable static files
+  config.mjs     config/app.json + env + flags, merged over the defaults
   paths.mjs      where scenes, configs and the cache live
 
   io/            getting points off disk

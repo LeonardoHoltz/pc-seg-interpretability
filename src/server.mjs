@@ -30,7 +30,8 @@ import { join, resolve, extname, normalize } from "node:path";
 import { Worker } from "node:worker_threads";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { WEB_DIR, CACHE_DIR, SCENES_DIR, CONFIG_DIR, ROOT } from "./paths.mjs";
+import { WEB_DIR, CACHE_DIR, SCENES_DIR, ROOT } from "./paths.mjs";
+import { config, publicConfig } from "./config.mjs";
 import { listScenes, describeScene, resolveScene, cacheDirFor } from "./scene/registry.mjs";
 import { previewPayload } from "./inference/predict.mjs";
 
@@ -229,8 +230,17 @@ function handle(req, res) {
   const path = url.pathname;
 
   // --- API ---
+  // Settings the front end needs, so nothing is duplicated as a literal in JS.
+  if (path === "/api/config" && req.method === "GET") {
+    return sendJson(res, 200, publicConfig());
+  }
+
   if (path === "/api/scenes" && req.method === "GET") {
-    return sendJson(res, 200, { scenesDir: SCENES_DIR, scenes: listScenes() });
+    return sendJson(res, 200, {
+      scenesDir: SCENES_DIR,
+      datasets: config.datasets.map((d) => ({ name: d.name, prefix: d.prefix, description: d.description })),
+      scenes: listScenes(),
+    });
   }
 
   let m = /^\/api\/scenes\/(.+)\/convert$/.exec(path);
@@ -243,9 +253,9 @@ function handle(req, res) {
     }
     const job = startConversion(id, {
       force: url.searchParams.get("force") === "1",
-      gridSize: Number(url.searchParams.get("grid") ?? 128),
+      gridSize: Number(url.searchParams.get("grid") ?? config.conversion.gridSize),
       primaryField: url.searchParams.get("primary") ?? null,
-      instances: url.searchParams.get("instances") !== "0",
+      instances: url.searchParams.get("instances") !== "0" && config.conversion.instances,
       instanceField: url.searchParams.get("instanceField") ?? null,
     });
     return sendJson(res, 202, { jobId: job.id });
@@ -545,8 +555,9 @@ const server = createServer((req, res) => {
 if (import.meta.url === `file://${process.argv[1]}`) {
   const argv = process.argv.slice(2);
   const flag = (n, d) => { const i = argv.indexOf(`--${n}`); return i === -1 ? d : argv[i + 1]; };
-  const port = Number(flag("port", process.env.PORT ?? 8080));
-  const host = flag("host", process.env.HOST ?? "127.0.0.1");
+  // Flags beat the environment, which beats config/app.json (see config.mjs).
+  const port = Number(flag("port", config.server.port));
+  const host = flag("host", config.server.host);
 
   if (!existsSync(join(WEB_DIR, "vendor", "potree", "potree.js"))) {
     console.warn("!! Potree is not vendored yet -- run `npm run build-viewer` first.\n");
@@ -555,9 +566,9 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   server.listen(port, host, () => {
     console.log(`point cloud interpretability tool`);
     console.log(`  serving   http://${host}:${port}`);
-    console.log(`  scenes    ${SCENES_DIR}`);
-    console.log(`  config    ${CONFIG_DIR}`);
+    console.log(`  config    ${config.sourceFile ?? "(defaults -- no config/app.json)"}`);
     console.log(`  cache     ${CACHE_DIR}`);
+    for (const d of config.datasets) console.log(`  dataset   ${d.name.padEnd(16)} ${d.path}`);
     const n = listScenes().length;
     console.log(`  ${n} scene(s) mapped` + (n === 0 ? " -- run `npm run demo` for a sample" : ""));
   });
