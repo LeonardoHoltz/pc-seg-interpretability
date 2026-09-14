@@ -446,6 +446,98 @@ prediction; running again replaces it, and re-converting from the PCD discards i
 Point positions are untouched: the rebuild reuses the octree's existing quantisation grid,
 so coordinates come out bit-identical.
 
+### Serving a real model: Pointcept
+
+`examples/segmentation_service.py` is a mock. The real counterpart lives in the
+[`pointcept/`](pointcept/) submodule and serves an actual trained segmentation model over
+the same protocol:
+
+```bash
+tools/serve_pointcept.sh                              # random LitePT-small, no weights
+tools/serve_pointcept.sh --weight exp/.../model_best.pth
+```
+
+[`tools/serve_pointcept.sh`](tools/serve_pointcept.sh) runs it inside the Pointcept docker
+image (`pointcept/pointcept:v1.6.0`), which is where the CUDA extensions live. The repo is
+mounted read-only with `PYTHONPATH` pointing at *this* checkout, so the image's own bundled
+`/workspace/Pointcept` is shadowed and the code served is the code in `pointcept/`. It picks
+up `config/scannet_subset/classes.json` for the legend automatically and publishes on
+`127.0.0.1:8500`.
+
+The script finds the GPU three ways, in order: `--gpus all`, then `--runtime=nvidia`, then
+mounting the device nodes and driver libraries by hand. The last one needs no root and works
+when the NVIDIA container toolkit is missing, but it is a stopgap — the real fix is
+`sudo apt install -y nvidia-container-toolkit && sudo nvidia-ctk runtime configure --runtime=docker && sudo systemctl restart docker`.
+There is no CPU fallback worth having: spconv-based backbones (LitePT, PTv3, SpUNet) have no
+CPU kernels and fail outright.
+
+It also passes `model.backbone.shuffle_orders=False`. LitePT and PTv3 call
+`serialization(shuffle_orders=True)`, which draws a `torch.randperm` on *every* forward —
+at eval too — so each position of a sweep would otherwise carry a different permutation.
+Pass `--allow-shuffle` to keep it. Note this removes the deliberate randomness but not all
+of it: the sparse kernels accumulate with atomics, so repeat requests still differ by ~1e-3.
+
+Without docker, the entry point is the same:
+
+```bash
+cd pointcept && python tools/serve_inference.py \
+    --config-file configs/scannet/semseg-pt-v3m1-0-base.py \
+    --weight exp/.../model_best.pth \
+    --class-names ../config/scannet_subset/classes.json --port 8500
+```
+
+The model is built once, at startup, and then waits — a request costs a forward pass and
+nothing else. Three pieces make it up:
+
+| file | what it is |
+| --- | --- |
+| `pointcept/utils/pcit_protocol.py` | the wire format above, encode and decode. No torch. |
+| `pointcept/engines/inference.py` | `InferenceEngine`: the resident model, plus `predict`, `ceteris_paribus` and `saliency` |
+| `tools/serve_inference.py` | the HTTP entry point and CLI |
+
+**One scene is one forward pass, and the reply carries raw logits.** A scene arriving on
+the wire becomes the same `data_dict` a `Dataset` would hand a `DataLoader`, then goes
+through that config's `transform` and `test_cfg.post_transform` — and nothing else.
+
+Deliberately skipped are the two averaging steps `tools/test.py` performs: `test_cfg.voxelize`
+in `"test"` mode, which splits a scene into fragments each holding one point per voxel
+(repeating points to pad sparse cells), and `test_cfg.aug_transform`, which re-runs the
+scene under several rotations. `SemSegTester` sums a softmax over all of that and reports
+the vote. That is right for a benchmark number and wrong for inspecting a model: what comes
+back is a mean over a dozen passes, not something the network ever produced. Here you get
+the network's actual output.
+
+A few things worth knowing:
+
+- **`grid_coord` is derived, not sampled — on validation's exact lattice.** It is normally
+  a by-product of `GridSample`, so the service reproduces that transform's arithmetic
+  (`floor(coord / grid_size)`, rebased on the lowest occupied cell), taking `grid_size` from
+  the config's `voxelize` block — read for that number only, never run — or `--grid-size`.
+  Note this is *not* `Point.sparsify()`'s fallback, which anchors on the cloud's own minimum
+  corner: that is a sub-voxel phase shift of the same lattice and puts only ~4% of a ScanNet
+  scene's points in the cell validation used. Verified equal to `GridSample`'s output for
+  every point of `scene0011_00`.
+- **Every input point is kept**, with no per-voxel deduplication, which is what makes the
+  output directly per-point. Backbones that serialize or attend over `grid_coord` (PTv3, and
+  anything `Point`-based) are fine with that. A backbone that builds a
+  `spconv.SparseConvTensor` expects *unique* voxel indices, so if you serve one of those and
+  see nonsense, that is the reason.
+- **Ceteris paribus canonicalises once, then moves the object.** Running the scene-level
+  transform per step would let `CenterShift` re-centre the whole cloud as the object moves —
+  which is exactly the confound the sweep exists to rule out. Everything except the masked
+  points is bit-identical between positions.
+- **The sweep replies with `logits`, not `probs`**, so the viewer applies the softmax itself
+  when it plots a class.
+- **Saliency is input × gradient** of the object's mean logit for the chosen class, taken
+  with respect to the input features, from one forward and one backward. That is Captum's
+  `InputXGradient`, done directly in about fifteen lines rather than wrapping Pointcept's
+  dict-in/dict-out forward in the tensor signature Captum expects. `--saliency-input coord`
+  attributes to position instead, and `both` sums them. If the chosen input has no gradient
+  path to the output the service says so rather than returning a flat field.
+- `--class-names` accepts a plain list, an id→name map, or the viewer's own
+  [`config/<id>/classes.json`](#segmentation-fields), so one file names the classes on both
+  sides. Without it, ScanNet configs fall back to Pointcept's own label lists.
+
 ### Interpretability: ceteris paribus
 
 The tab's **Interpretability** section holds the scene fixed, moves one object through a
