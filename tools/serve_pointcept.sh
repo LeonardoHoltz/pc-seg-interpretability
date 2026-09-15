@@ -17,7 +17,16 @@ set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MOUNT=/workspace/repo
 
-IMAGE="${PCIT_POINTCEPT_IMAGE:-pointcept/pointcept:v1.6.0}"
+# Prefer the locally built image (tools/build_pointcept_image.sh), which adds the
+# CUDA extensions the published one leaves out, and fall back to the published
+# image when it has not been built yet.
+if [[ -n "${PCIT_POINTCEPT_IMAGE:-}" ]]; then
+  IMAGE="$PCIT_POINTCEPT_IMAGE"
+elif docker image inspect pcit-pointcept:latest >/dev/null 2>&1; then
+  IMAGE="pcit-pointcept:latest"
+else
+  IMAGE="pointcept/pointcept:v1.6.0"
+fi
 CONFIG="configs/scannet/semseg-litept-v1m1-0-small.py"
 CLASS_NAMES="config/scannet_subset/classes.json"
 WEIGHT=""

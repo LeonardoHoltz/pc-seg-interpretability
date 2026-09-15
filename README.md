@@ -457,8 +457,23 @@ tools/serve_pointcept.sh                              # random LitePT-small, no 
 tools/serve_pointcept.sh --weight exp/.../model_best.pth
 ```
 
-[`tools/serve_pointcept.sh`](tools/serve_pointcept.sh) runs it inside the Pointcept docker
-image (`pointcept/pointcept:v1.6.0`), which is where the CUDA extensions live. The repo is
+Build the image once, first:
+
+```bash
+tools/build_pointcept_image.sh      # -> pcit-pointcept:latest
+```
+
+[`docker/Dockerfile`](docker/Dockerfile) takes the published `pointcept/pointcept:v1.6.0`
+and compiles the CUDA extensions it ships without. **`pointrope` is the one that matters
+here**: LitePT wants it for its rotary position embedding and, when it is missing, logs
+`[PointROPE] CUDA implementation unavailable ... Using slower Pytorch fallback` and quietly
+runs that part in plain PyTorch. `--libs "pointrope pointops2 pointseg"` adds the other two
+the base image leaves out. The build context is `pointcept/libs/` alone, which keeps
+`weights/` out of it, and the build compiles from *this* checkout rather than the image's
+bundled copy.
+
+[`tools/serve_pointcept.sh`](tools/serve_pointcept.sh) then picks `pcit-pointcept:latest` up
+automatically, falling back to the published image if you have not built it. The repo is
 mounted read-only with `PYTHONPATH` pointing at *this* checkout, so the image's own bundled
 `/workspace/Pointcept` is shadowed and the code served is the code in `pointcept/`. It picks
 up `config/scannet_subset/classes.json` for the legend automatically and publishes on
@@ -471,11 +486,18 @@ when the NVIDIA container toolkit is missing, but it is a stopgap — the real f
 There is no CPU fallback worth having: spconv-based backbones (LitePT, PTv3, SpUNet) have no
 CPU kernels and fail outright.
 
+Checkpoints go in `pointcept/weights/` — already in Pointcept's own `.gitignore`, so large
+files stay out of git. A bare filename is resolved against it, so `--weight model_best.pth`
+is enough.
+
 It also passes `model.backbone.shuffle_orders=False`. LitePT and PTv3 call
 `serialization(shuffle_orders=True)`, which draws a `torch.randperm` on *every* forward —
 at eval too — so each position of a sweep would otherwise carry a different permutation.
 Pass `--allow-shuffle` to keep it. Note this removes the deliberate randomness but not all
-of it: the sparse kernels accumulate with atomics, so repeat requests still differ by ~1e-3.
+of it: the sparse kernels accumulate with atomics, so two identical requests still differ.
+On a 237k-point ScanNet scene that came to **0.6–1.4% of points changing predicted label**
+between runs (single-scene accuracy 88.9 / 89.2 / 89.0%). Worth knowing before reading a
+small difference between two sweep positions as signal.
 
 Without docker, the entry point is the same:
 
