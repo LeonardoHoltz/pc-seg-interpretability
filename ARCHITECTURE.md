@@ -10,6 +10,7 @@ How this software is put together, and why. For what it *does*, see the
 ```
 src/
   server.mjs      the API, SSE progress, Range-capable static files
+  config.mjs      config/app.json, with flag / env / file precedence
   paths.mjs       where scenes and the cache live
 
   io/             getting points off disk
@@ -25,8 +26,10 @@ src/
   scene/          a scene as the app understands it
     registry.mjs    discovery, scene ids, class configs
     fields.mjs      sorts raw fields into position / colour / scalar / categorical
+    roles.mjs       which field is semantic, which enumerates objects
     palette.mjs     colours for classes
     convert.mjs     source cloud -> octree + scene.json  (also the CLI)
+    thumbnail.mjs   the small pictures: scene cards and library rows
     attributes.mjs  adds scalar fields to an already-converted scene
 
   objects/        the object library
@@ -54,8 +57,11 @@ web/              front-end (vendor/potree is generated, not committed)
 
 scenes/           your scenes: .pcd files, or folders of .npy arrays
 cache/            generated octrees, one folder per scene
-tools/            viewer build, demo scenes, octree verifier
+config/           app.json, and what a class id means per dataset
+tools/            viewer build, demo scenes, octree verifier, serve_pointcept.sh
 examples/         reference segmentation service (documents the wire format)
+docker/           the Pointcept image: Dockerfile and its build script
+pointcept/        submodule: the fork that serves the real model
 ```
 
 Folders group modules by **what they are responsible for**, not by kind. Three
@@ -97,6 +103,11 @@ read a cloud   ->   sort the fields  ->  write the      ->   metadata.json
 shape, so nothing downstream knows or cares whether the points came from a PCD
 or a directory of `.npy` arrays. Adding a third format means adding a reader
 here and nothing else.
+
+**`scene/roles.mjs` is the application's vocabulary.** Datasets disagree about
+what to call a semantic field and an object id, so each one declares its own
+nomenclature and every module after the reader speaks in roles — `semantic` and
+`instance` — rather than in field names.
 
 **`scene/fields.mjs` is where raw columns become meaning.** It decides which
 fields are position, which is colour, which are continuous scalars, which are
@@ -181,6 +192,7 @@ while `bake` needs scene-level helpers (`fields`, `registry`, `palette`). That
 is a real mutual relationship rather than an accident of layering, and no
 individual file takes part in a cycle.
 
-**`paths.mjs` stayed at the root** instead of getting a `config/` folder of its
-own. It is one small module that everything shares, and a folder holding a
-single file is worse than no folder at all.
+**`config.mjs` and `paths.mjs` stayed at the root** instead of getting a folder
+of their own. They are what everything else shares — the settings, and where
+things live — and a folder holding them would only add a level to every import
+path.

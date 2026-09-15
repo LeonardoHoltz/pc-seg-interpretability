@@ -9,81 +9,9 @@
  */
 import { join } from "node:path";
 import { writeOctree } from "../octree/write.mjs";
+import { silhouette, SILHOUETTE } from "../scene/thumbnail.mjs";
 
-/** Field names that usually hold a per-object id rather than a semantic class. */
-const INSTANCE_NAMES = [
-  "instance", "instances", "instance_id", "object_id", "obj_id", "object",
-  "objects", "cluster", "cluster_id", "segment_id", "track_id", "part_id",
-];
-
-/** Thumbnail resolution for the library. */
-export const SILHOUETTE = 32;
-
-/** Azimuth and elevation of the thumbnail's three-quarter view. */
-const VIEW_AZIMUTH = (40 * Math.PI) / 180;
-const VIEW_ELEVATION = (25 * Math.PI) / 180;
-
-/**
- * Renders a small shaded three-quarter view of an object.
- *
- * A straight-on elevation stretched to fill a square is unreadable -- every
- * object becomes the same filled rectangle. This projects the points the way a
- * viewer would actually look at them, fits the result with its aspect ratio
- * intact, and shades by depth so the shape reads at thumbnail size.
- *
- * Encoded one hex nibble per cell: 0 is empty, 1-15 is near-to-far shading.
- */
-export function silhouette(indices, px, py, pz, anchor) {
-  const ca = Math.cos(VIEW_AZIMUTH), sa = Math.sin(VIEW_AZIMUTH);
-  const ce = Math.cos(VIEW_ELEVATION), se = Math.sin(VIEW_ELEVATION);
-
-  // Screen basis for a camera orbiting at (azimuth, elevation), z up.
-  const project = (x, y, z) => [
-    -x * sa + y * ca,
-    -x * se * ca - y * se * sa + z * ce,
-  ];
-  const depthOf = (x, y, z) => x * ce * ca + y * ce * sa + z * se;
-
-  let minU = Infinity, maxU = -Infinity, minV = Infinity, maxV = -Infinity;
-  let minD = Infinity, maxD = -Infinity;
-  for (const i of indices) {
-    const x = px[i] - anchor[0], y = py[i] - anchor[1], z = pz[i] - anchor[2];
-    const [u, v] = project(x, y, z);
-    const d = depthOf(x, y, z);
-    if (u < minU) minU = u; if (u > maxU) maxU = u;
-    if (v < minV) minV = v; if (v > maxV) maxV = v;
-    if (d < minD) minD = d; if (d > maxD) maxD = d;
-  }
-
-  // Fit with the aspect ratio preserved, leaving a one-cell margin.
-  const pad = 1;
-  const usable = SILHOUETTE - 2 * pad;
-  const spanU = Math.max(maxU - minU, 1e-6);
-  const spanV = Math.max(maxV - minV, 1e-6);
-  const scale = usable / Math.max(spanU, spanV);
-  const offU = pad + (usable - spanU * scale) / 2;
-  const offV = pad + (usable - spanV * scale) / 2;
-  const spanD = Math.max(maxD - minD, 1e-6);
-
-  const cells = new Uint8Array(SILHOUETTE * SILHOUETTE);   // 0 = empty
-  for (const i of indices) {
-    const x = px[i] - anchor[0], y = py[i] - anchor[1], z = pz[i] - anchor[2];
-    const [u, v] = project(x, y, z);
-    let cu = Math.floor(offU + (u - minU) * scale);
-    let cv = Math.floor(offV + (maxV - v) * scale);        // v up -> row 0 on top
-    if (cu < 0) cu = 0; else if (cu >= SILHOUETTE) cu = SILHOUETTE - 1;
-    if (cv < 0) cv = 0; else if (cv >= SILHOUETTE) cv = SILHOUETTE - 1;
-
-    // Nearest point wins the cell, so the shading reads as a surface.
-    const shade = 15 - Math.min(14, Math.floor(((depthOf(x, y, z) - minD) / spanD) * 14));
-    const idx = cv * SILHOUETTE + cu;
-    if (shade > cells[idx]) cells[idx] = shade;
-  }
-
-  let hex = "";
-  for (let i = 0; i < cells.length; i++) hex += cells[i].toString(16);
-  return hex;
-}
+export { silhouette, SILHOUETTE };
 
 /**
  * Convex hull of the footprint, relative to the anchor.
@@ -125,27 +53,6 @@ export function footprintHull(indices, px, py, anchor, maxPoints = 28) {
     hull.splice(worst, 1);
   }
   return hull.map(([x, y]) => [Number(x.toFixed(3)), Number(y.toFixed(3))]);
-}
-
-/**
- * Chooses which categorical field enumerates objects.
- * Prefers an obviously-named field, otherwise the categorical field with the
- * most distinct values that is not already being used as the class field.
- */
-export function pickInstanceField(described, classFieldName, override = null) {
-  const candidates = described.categorical.filter((s) => s.name !== classFieldName);
-  if (candidates.length === 0) return null;
-
-  if (override) {
-    const hit = candidates.find((s) => s.source === override || s.name === override);
-    if (hit) return hit;
-  }
-  for (const want of INSTANCE_NAMES) {
-    const hit = candidates.find((s) => s.source.toLowerCase() === want);
-    if (hit) return hit;
-  }
-  // Fall back to the field that looks most like an id: the most classes.
-  return candidates.slice().sort((a, b) => b.numClasses - a.numClasses)[0] ?? null;
 }
 
 /**

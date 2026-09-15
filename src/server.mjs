@@ -25,7 +25,7 @@
  * hierarchy.bin with `Range: bytes=a-b` and cannot load a cloud without it.
  */
 import { createServer } from "node:http";
-import { createReadStream, existsSync, statSync, readFileSync } from "node:fs";
+import { createReadStream, existsSync, statSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve, extname, normalize } from "node:path";
 import { Worker } from "node:worker_threads";
 import { randomUUID } from "node:crypto";
@@ -34,6 +34,8 @@ import { WEB_DIR, CACHE_DIR, SCENES_DIR, ROOT } from "./paths.mjs";
 import { config, publicConfig } from "./config.mjs";
 import { listScenes, describeScene, resolveScene, cacheDirFor } from "./scene/registry.mjs";
 import { previewPayload } from "./inference/predict.mjs";
+import { sceneThumbnail } from "./scene/thumbnail.mjs";
+import { readOctree } from "./octree/read.mjs";
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -259,6 +261,47 @@ function handle(req, res) {
       instanceField: url.searchParams.get("instanceField") ?? null,
     });
     return sendJson(res, 202, { jobId: job.id });
+  }
+
+  // The scene browser's card picture. Written during conversion; a cache built
+  // before thumbnails existed gets one computed from its octree, once.
+  m = /^\/api\/scenes\/(.+)\/thumbnail$/.exec(path);
+  if (m && req.method === "GET") {
+    const id = decodeURIComponent(m[1]);
+    const file = join(cacheDirFor(id), "scene.json");
+    if (!existsSync(file)) return sendError(res, 404, "not converted");
+    let scene;
+    try { scene = JSON.parse(readFileSync(file, "utf8")); } catch { return sendError(res, 404, "unreadable"); }
+
+    if (!scene.thumbnail) {
+      try {
+        const cloud = readOctree(cacheDirFor(id));
+        const indices = new Uint32Array(cloud.count);
+        for (let i = 0; i < indices.length; i++) indices[i] = i;
+
+        // The octree stores colour interleaved; the renderer wants a plane each.
+        const packed = cloud.columns.get("rgb");
+        let rgb = null;
+        if (packed?.numElements === 3) {
+          rgb = [0, 1, 2].map(() => new Uint8Array(cloud.count));
+          for (let i = 0; i < cloud.count; i++) {
+            for (let c = 0; c < 3; c++) rgb[c][i] = packed.data[i * 3 + c];
+          }
+        }
+
+        scene.thumbnail = sceneThumbnail(indices, cloud.x, cloud.y, cloud.z, rgb);
+        if (scene.thumbnail) writeFileSync(file, JSON.stringify(scene, null, 2));
+      } catch (err) {
+        return sendError(res, 404, `no thumbnail: ${err.message}`);
+      }
+    }
+    if (!scene.thumbnail) {
+      return sendError(res, 404, "this scene has no points to draw");
+    }
+    // Immutable for the life of this conversion: the cache directory is rewritten
+    // wholesale when a scene is reconverted.
+    res.setHeader("cache-control", "private, max-age=86400");
+    return sendJson(res, 200, scene.thumbnail ?? null);
   }
 
   m = /^\/api\/jobs\/([^/]+)\/events$/.exec(path);

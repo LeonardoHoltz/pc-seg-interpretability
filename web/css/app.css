@@ -173,7 +173,23 @@ html, body {
   margin: 2px 8px; padding: 9px 10px;
   border: 1px solid transparent; border-radius: var(--radius);
   cursor: pointer; position: relative;
+  /* A picture on the left, spanning however many rows the card grows to: the
+     progress bar and status line are appended to the card during a conversion
+     and must land beside the thumbnail, not under it. */
+  display: grid; grid-template-columns: auto 1fr; column-gap: 9px; align-items: start;
 }
+.scene > :not(.scene-thumb) { grid-column: 2; min-width: 0; }
+.scene-thumb {
+  grid-column: 1; grid-row: 1 / span 99;
+  width: 52px; height: 52px; flex: none;
+  background: var(--bg); border: 1px solid var(--line-soft); border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.scene-thumb canvas { width: 100%; height: 100%; display: block; }
+/* Not converted yet, so there is nothing to draw: a quiet placeholder keeps
+   every card the same shape. */
+.scene-thumb.empty { background:
+  repeating-linear-gradient(-45deg, var(--bg) 0 4px, var(--bg-raised) 4px 8px); opacity: .5; }
 .scene:hover { background: var(--bg-hover); }
 .scene.selected { background: var(--bg-active); border-color: var(--accent-dim); }
 .scene .row1 { display: flex; align-items: center; gap: 7px; }

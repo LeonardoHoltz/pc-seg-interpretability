@@ -7,7 +7,8 @@
 #   named 'pointrope'). Using slower Pytorch fallback.
 #
 # and silently runs its rotary position embedding in plain PyTorch. This image
-# adds the compiled extension so the CUDA path is taken.
+# adds the compiled extension so the CUDA path is taken, and installs the Python
+# packages the published image lacks (peft, for LoRA-style fine-tuning).
 #
 # The build context is `pointcept/libs/` -- the sources compiled here are the
 # ones in this checkout, not the image's bundled copy -- and keeping the context
@@ -15,7 +16,7 @@
 #
 #   docker build -f docker/Dockerfile -t pcit-pointcept:latest pointcept/libs
 #
-# or just `tools/build_pointcept_image.sh`.
+# or just `docker/build_pointcept_image.sh`.
 
 ARG BASE_IMAGE=pointcept/pointcept:v1.6.0
 FROM ${BASE_IMAGE}
@@ -48,6 +49,26 @@ RUN set -eux; \
     done; \
     rm -rf /tmp/libs
 
+# ---- Python packages on top of the image's own -------------------------------
+# peft (parameter-efficient fine-tuning: LoRA and friends) is not in the
+# published image. Version it here rather than at the call site so an image tag
+# always means one set of packages; override with
+# --build-arg PIP_PACKAGES="peft==0.17.0".
+ARG PIP_PACKAGES="peft"
+
+# The constraint file is the point of this layer. peft depends on torch,
+# transformers and accelerate, and left to itself pip will happily pull a fresh
+# torch off PyPI -- which would be a different build from the image's, breaking
+# the ABI the extensions above were just compiled against (same hazard as
+# --no-build-isolation, one layer up). Freezing the installed torch to its exact
+# version, local +cuXXX suffix and all, means the resolver has to keep what is
+# already here.
+RUN set -eux; \
+    python -c "import torch; print('torch==' + torch.__version__)" > /tmp/constraints.txt; \
+    cat /tmp/constraints.txt; \
+    pip install --no-cache-dir -c /tmp/constraints.txt ${PIP_PACKAGES}; \
+    rm -f /tmp/constraints.txt
+
 # Fail the build rather than the first request if an extension did not land.
 # torch has to be imported first: these extensions link against libc10.so, which
 # is only on the loader path once torch itself has pulled it in. That is the
@@ -56,3 +77,7 @@ RUN set -eux; \
     for lib in ${LIBS}; do \
         python -c "import torch, importlib, sys; m = importlib.import_module(sys.argv[1]); print('  ' + sys.argv[1] + ': ok -> ' + m.__file__)" "$lib"; \
     done
+
+# And that the packages above did not quietly displace torch while installing.
+RUN set -eux; \
+    python -c "import torch, peft; print('  torch:', torch.__version__, '/ peft:', peft.__version__)"

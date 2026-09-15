@@ -17,7 +17,7 @@ set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MOUNT=/workspace/repo
 
-# Prefer the locally built image (tools/build_pointcept_image.sh), which adds the
+# Prefer the locally built image (docker/build_pointcept_image.sh), which adds the
 # CUDA extensions the published one leaves out, and fall back to the published
 # image when it has not been built yet.
 if [[ -n "${PCIT_POINTCEPT_IMAGE:-}" ]]; then

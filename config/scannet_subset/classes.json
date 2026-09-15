@@ -1,6 +1,5 @@
 {
   "description": "ScanNet v2 indoor scans (Pointcept preprocessing: contiguous training ids, -1 = ignore)",
-  "primaryField": "segment20",
   "fields": {
     "segment20": {
       "name": "Semantic class (ScanNet 20)",

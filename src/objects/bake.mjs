@@ -19,6 +19,13 @@ import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { readCloud } from "../io/cloud.mjs";
 import { describeFields } from "../scene/fields.mjs";
+
+/** The field the library was built from, for a scene converted before roles. */
+function instanceFieldOf(cacheDir) {
+  const file = join(cacheDir, "instances.json");
+  if (!existsSync(file)) return null;
+  try { return JSON.parse(readFileSync(file, "utf8")).field ?? null; } catch { return null; }
+}
 import { writeOctree } from "../octree/write.mjs";
 import { readOctree } from "../octree/read.mjs";
 import { silhouette, footprintHull, SILHOUETTE } from "./instances.mjs";
@@ -96,9 +103,14 @@ export function bakeInstances(sceneId, placements, options = {}) {
   onProgress({ phase: "reading", progress: 0, message: "Reading the scene" });
   const pcdPath = resolveScene(sceneId);
   const pcd = readCloud(pcdPath);
+  // Pin the roles to whatever this scene was converted with, so a rebake never
+  // reshuffles which field is semantic and which enumerates objects.
   const described = describeFields(pcd, {
     classesSidecar: readSidecar(pcdPath),
-    primaryField: sceneInfo.classification?.source ?? null,
+    roles: {
+      semantic: sceneInfo.roles?.semantic?.source ?? sceneInfo.classification?.source ?? undefined,
+      instance: sceneInfo.roles?.instance?.source ?? instanceFieldOf(outDir) ?? undefined,
+    },
   });
 
   const { valid, numValid, position, color, scalars, primary } = described;

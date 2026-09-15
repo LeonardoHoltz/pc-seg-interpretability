@@ -14,12 +14,19 @@
     "demo": {
       "path": "scenes",
       "prefix": "",
+      "roles": { "semantic": "label", "instance": "instance" },
       "description": "Synthetic street scenes from `npm run demo`"
     },
     "scannet_subset": {
       "path": "scenes/scannet_subset",
-      "primaryField": "segment20",
+      "roles": { "semantic": "segment20", "instance": "instance" },
       "description": "ScanNet v2 indoor scans, Pointcept preprocessing"
+    },
+    "s3dis_subset": {
+      "path": "scenes/s3dis subset",
+      "prefix": "s3dis subset",
+      "roles": { "semantic": "segment", "instance": "instance" },
+      "description": "S3DIS rooms, Pointcept preprocessing"
     }
   },
 

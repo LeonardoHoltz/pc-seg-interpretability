@@ -73,6 +73,28 @@ export function drawSilhouette(canvas, hex, size, color) {
 }
 
 /**
+ * Draws a scene thumbnail: four characters per cell, "0"/"1" for empty/filled
+ * then one hex digit each of r, g, b. See src/scene/thumbnail.mjs.
+ */
+export function drawThumbnail(canvas, thumb) {
+  const ctx = canvas.getContext("2d");
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  if (!thumb?.cells) return;
+
+  const { size, cells } = thumb;
+  const cell = canvas.width / size;
+  for (let i = 0; i < size * size; i++) {
+    const at = i * 4;
+    if (cells[at] !== "1") continue;
+    const r = parseInt(cells[at + 1], 16) * 17;
+    const g = parseInt(cells[at + 2], 16) * 17;
+    const b = parseInt(cells[at + 3], 16) * 17;
+    ctx.fillStyle = `rgb(${r},${g},${b})`;
+    ctx.fillRect((i % size) * cell, Math.floor(i / size) * cell, Math.ceil(cell), Math.ceil(cell));
+  }
+}
+
+/**
  * A modal confirmation. Resolves true if the user confirms, false otherwise.
  * `bodyNode` may be any element; it is shown between the title and the buttons.
  */

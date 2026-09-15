@@ -114,6 +114,8 @@ export function readSidecar(scenePath, id = idForPath(scenePath)) {
     merged = {
       ...(merged ?? {}), ...cfg,
       fields: { ...(merged?.fields ?? {}), ...(cfg.fields ?? {}) },
+      // Per role, so a scene can redeclare one of the two and inherit the other.
+      roles: { ...(merged?.roles ?? {}), ...(cfg.roles ?? {}) },
     };
   }
   return merged;

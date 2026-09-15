@@ -9,6 +9,7 @@
  *  - keeping attribute names clear of the ones Potree reserves for its own
  *    shader paths.
  */
+import { resolveRoles } from "./roles.mjs";
 
 /**
  * Names Potree either binds to a dedicated vertex-attribute slot or turns into
@@ -33,15 +34,6 @@ const POSITION_NAMES = { x: 0, y: 1, z: 2 };
 /** Field names that are almost certainly a segmentation / class id. */
 const SEGMENTATION_PATTERN =
   /^(label|labels|classification|class|classes|semantic\d*|semantics|sem_seg|seg|segment\d*|segmentation|category|categories|panoptic|instance\d*|instances|object|object_id|obj_id|cluster|cluster_id|part|part_id)$/i;
-
-/** Preference order when picking the one field that drives Potree's class LUT. */
-const PRIMARY_PREFERENCE = [
-  "classification", "label", "labels", "semantic", "semantics",
-  "segmentation", "seg", "class", "category", "panoptic",
-  // Datasets that ship several label sets: prefer the coarse one, which is the
-  // more useful default to open on.
-  "segment20", "segment200",
-];
 
 const isIntegerType = (f) => f.type === "I" || f.type === "U";
 
@@ -114,7 +106,7 @@ function unpackRgb(data, numPoints) {
 
 /**
  * @param pcd     result of readPcd()
- * @param options { classesSidecar, primaryField }
+ * @param options { classesSidecar, roles }  -- `roles` is a role map, see roles.mjs
  */
 export function describeFields(pcd, options = {}) {
   const { numPoints, fields } = pcd;
@@ -211,21 +203,17 @@ export function describeFields(pcd, options = {}) {
     });
   }
 
-  // ---- which categorical field drives Potree's classification LUT ------
+  // ---- semantic vs instance -------------------------------------------
+  // Which field means what is the dataset's business, not this module's; see
+  // scene/roles.mjs. `primary` is the semantic field under its older name: it
+  // is what goes into Potree's one classification LUT.
   const categorical = scalars.filter((s) => s.kind === "categorical");
-  let primary = null;
-  if (options.primaryField) {
-    primary = categorical.find((s) => s.source === options.primaryField || s.name === options.primaryField) ?? null;
-  }
-  if (!primary) {
-    for (const want of PRIMARY_PREFERENCE) {
-      primary = categorical.find((s) => s.source.toLowerCase() === want);
-      if (primary) break;
-    }
-  }
-  if (!primary) primary = categorical[0] ?? null;
+  const roles = resolveRoles(categorical, options.roles ?? {});
 
-  return { numPoints, numValid, valid, position: pos, color, scalars, categorical, primary };
+  return {
+    numPoints, numValid, valid, position: pos, color, scalars, categorical,
+    roles, primary: roles.semantic,
+  };
 }
 
 export { sanitize, RESERVED };

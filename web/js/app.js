@@ -7,7 +7,7 @@
  */
 
 import {
-  $, el, fmtInt, fmtBytes, fmtNum, rgbCss, rgbHex, hexRgb, encId, fetchJson, toast,
+  $, el, fmtInt, fmtBytes, fmtNum, rgbCss, rgbHex, hexRgb, encId, fetchJson, toast, drawThumbnail,
 } from "./util.js";
 import { createInstanceManager } from "./instances.js";
 import { createSegmentation } from "./segmentation.js";
@@ -171,10 +171,46 @@ function renderSceneList() {
   }
 }
 
+/**
+ * Scene thumbnails, by scene id. Fetched once per card render and kept, since
+ * the picture only changes when the scene is reconverted -- which drops the
+ * entry. `null` means asked for and there isn't one.
+ */
+const thumbnails = new Map();
+
+/** The picture on a scene card. Empty until the scene has been converted. */
+function renderSceneThumb(scene) {
+  const box = el("div", "scene-thumb");
+  if (scene.status !== "ready") {
+    box.classList.add("empty");
+    box.title = "Open this scene once and its picture appears here";
+    return box;
+  }
+
+  const canvas = el("canvas");
+  canvas.width = canvas.height = 96;
+  box.appendChild(canvas);
+
+  const show = (thumb) => {
+    if (thumb) drawThumbnail(canvas, thumb);
+    else box.classList.add("empty");
+  };
+
+  if (thumbnails.has(scene.id)) {
+    show(thumbnails.get(scene.id));
+  } else {
+    fetchJson(`/api/scenes/${encId(scene.id)}/thumbnail`)
+      .then((thumb) => { thumbnails.set(scene.id, thumb); show(thumb); })
+      .catch(() => { thumbnails.set(scene.id, null); show(null); });
+  }
+  return box;
+}
+
 function renderSceneCard(scene) {
   const card = el("div", "scene");
   card.dataset.id = scene.id;
   if (scene.id === state.currentId) card.classList.add("selected");
+  card.appendChild(renderSceneThumb(scene));
 
   const row = el("div", "row1");
   row.appendChild(el("div", "nm", scene.name));
@@ -214,6 +250,8 @@ function convertScene(scene, { force = false } = {}) {
     }
     const cleanup = () => {
       state.converting.delete(scene.id);
+      // The cache directory has been rewritten, so the old picture is gone.
+      thumbnails.delete(scene.id);
       if (card) {
         card.querySelector(".status-line")?.remove();
         card.querySelector(".scene-progress")?.remove();

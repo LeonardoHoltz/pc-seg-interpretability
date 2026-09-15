@@ -110,7 +110,7 @@ function normalizeDatasets(cfg) {
   const scenesDir = resolvePath(cfg.paths.scenes);
   const entries = Object.entries(cfg.datasets ?? {});
   if (entries.length === 0) {
-    return [{ name: "scenes", path: scenesDir, prefix: "", primaryField: null, description: null }];
+    return [{ name: "scenes", path: scenesDir, prefix: "", roles: null, primaryField: null, description: null }];
   }
   return entries.map(([name, raw]) => {
     const spec = typeof raw === "string" ? { path: raw } : (raw ?? {});
@@ -122,6 +122,9 @@ function normalizeDatasets(cfg) {
       // scenes at the top level, which is how the bundled demo scenes keep the
       // bare ids they have always had.
       prefix: (spec.prefix ?? name).replace(/^\/+|\/+$/g, ""),
+      // What this dataset calls its semantic and instance fields; see
+      // scene/roles.mjs. `primaryField` is the older spelling of roles.semantic.
+      roles: spec.roles ?? null,
       primaryField: spec.primaryField ?? null,
       description: spec.description ?? null,
     };

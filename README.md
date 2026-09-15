@@ -79,6 +79,76 @@ variables are `PCIT_HOST`, `PCIT_PORT`, `PCIT_SCENES_DIR`, `PCIT_CACHE_DIR`,
 `PCIT_CONFIG_DIR`, `PCIT_INFERENCE_ENDPOINT` and `PCIT_GRID_SIZE`. Relative paths resolve
 against the repo root; absolute ones are used as given.
 
+### Field roles
+
+Datasets disagree about what to call things. ScanNet's Pointcept export has `segment20`,
+`segment200` and `instance`; S3DIS has `segment` and `instance`; a PCD might have `label`
+and `object_id`. The application does not care, because it works in terms of two **roles**:
+
+| role | means | used for |
+| --- | --- | --- |
+| `semantic` | what kind of thing a point is | the class legend, per-class visibility, Potree's classification slot |
+| `instance` | which particular object it belongs to | the object library, ceteris paribus, saliency |
+
+Each dataset states its own nomenclature once and everything downstream speaks roles:
+
+```jsonc
+"datasets": {
+  "s3dis_subset": {
+    "path": "scenes/s3dis subset",
+    "roles": { "semantic": "segment", "instance": "instance" }
+  }
+}
+```
+
+The same block works in a `classes.json`, at any level, so a folder or a single scene can
+override one role and inherit the other. The older `primaryField` spelling still means
+`roles.semantic`, and `instanceField` means `roles.instance`. A field keeps its own name
+everywhere it is shown — only the role is translated.
+
+**Undeclared datasets still work**, in three steps per role: what was declared, then a
+conventional name (`classification`, `label`, `semantic`, `segment`, `segment20`, … for
+semantic; `instance`, `object_id`, `cluster`, … for instance), then inference from the data.
+Inference never reads field *order*, the one thing that carries no meaning — it reads
+cardinality: a semantic field has a handful of classes, an instance field has one value per
+object, so the fewest distinct values is semantic and the most is instance. A field named
+like an object id is never the semantic one; a cloud whose only label is `instance` has no
+classes to show, it has objects.
+
+That last rule is not hypothetical. S3DIS ships `segment.npy` (13 classes) and
+`instance.npy` (one id per object) side by side, and `instance` sorts first: taking the
+first categorical field gave the class legend the object ids and the object library the
+semantic classes, so the "library" was 13 blobs, each one every chair in the room at once.
+
+Each converted scene records what it resolved to, and how, in `scene.json`:
+
+```jsonc
+"roles": {
+  "semantic": { "field": "segment", "source": "segment", "classes": 13 },
+  "instance": { "field": "instance", "source": "instance", "classes": 45 },
+  "resolvedBy": { "semantic": "declared", "instance": "declared" }
+}
+```
+
+`resolvedBy` is `declared`, `name` or `inferred` — so a scene that was guessed at says so.
+
+### Scene thumbnails
+
+Every converted scene gets a small picture on its card in the browser, drawn from the same
+three-quarter view the object library uses so the two read as one set. It is generated
+during conversion from the points already in memory (`src/scene/thumbnail.mjs`), stored in
+`scene.json`, and served by `/api/scenes/:id/thumbnail`; a cache built before thumbnails
+existed gets one computed from its octree on first request and written back, so no
+reconversion is needed. Scenes that have not been converted show a placeholder — there is
+nothing to draw without reading the file, and the browser stays instant precisely because it
+does not.
+
+Indoor scans get their **ceiling dropped**: viewed from above the horizon a room is a picture
+of its lid, identical for every scene. The top slab of points is culled only when it really
+is a lid — when it covers most of the scene's footprint — so furniture tops, walls and
+outdoor scans keep every point. The colours are the scene's own, dimmed with distance and
+lifted a little, because a 48-pixel card of an indoor scan at true exposure is unreadable.
+
 ### Datasets
 
 A dataset is a **declared root**, which is what lets a large collection stay on the disk it
@@ -87,7 +157,8 @@ already lives on:
 ```jsonc
 "datasets": {
   "demo":    { "path": "scenes", "prefix": "" },
-  "scannet": { "path": "/mnt/data/scannet", "primaryField": "segment20" }
+  "scannet": { "path": "/mnt/data/scannet",
+               "roles": { "semantic": "segment20", "instance": "instance" } }
 }
 ```
 
@@ -100,8 +171,8 @@ keep bare ids like `demo_street_binary`.
 
 A dataset nested inside another's root belongs to the one that declares it, so `scenes/` and
 `scenes/scannet_subset/` can both be datasets without the scans being listed twice.
-`primaryField` picks the class field for datasets shipping several label sets, exactly as in
-a `classes.json`. With no `datasets` block at all, the whole scenes directory is one unnamed
+`roles` says which field is the semantic one and which enumerates objects, for datasets
+shipping several label sets; see [Field roles](#field-roles). With no `datasets` block at all, the whole scenes directory is one unnamed
 dataset — the original behaviour.
 
 Class names and colours are a separate, per-dataset concern; see
@@ -132,6 +203,9 @@ Other categorical fields still get distinct flat colour bands and a legend, but 
 per-class visibility — that is a limit of Potree's shader, which has exactly one class
 LUT. The panel offers a **“Make *field* the class field”** button that reconverts the
 scene so a different field takes that slot.
+
+**Which field gets the slot** is the dataset's business to declare; see
+[Field roles](#field-roles).
 
 Class order, names and colours can be pinned with a config file. These live under
 `config/`, keyed by **scene id** — so for the default single-root setup it mirrors the
@@ -298,7 +372,7 @@ density gets this wrong for anything unusually sparse — a large, thinly-sample
 one real scan came out 6.5x oversized that way. Every extracted object now matches its
 scene's finest spacing exactly.
 
-`estimateSpacing()` in `src/octree.mjs` remains for clouds converted without a parent to
+`estimateSpacing()` in `src/octree/write.mjs` remains for clouds converted without a parent to
 inherit from — a small scene whose root was never subsampled — where it finds the grid
 resolution at which nearly every cell holds a single point.
 
@@ -368,7 +442,7 @@ are carried over automatically — integrating a second object does not discard 
 Objects rotate and scale about an **anchor** at the centre of their footprint, at their
 lowest point, rather than about the corner of their bounding cube — that is what makes
 dropping and spinning them feel right. (Potree puts an octree's origin at its bounding
-cube's minimum corner, so `src/instances.mjs` records `anchorLocal` and the viewer
+cube's minimum corner, so `src/objects/instances.mjs` records `anchorLocal` and the viewer
 compensates for it on every transform.)
 
 Instances with fewer than 24 points are skipped.
@@ -460,7 +534,7 @@ tools/serve_pointcept.sh --weight exp/.../model_best.pth
 Build the image once, first:
 
 ```bash
-tools/build_pointcept_image.sh      # -> pcit-pointcept:latest
+docker/build_pointcept_image.sh      # -> pcit-pointcept:latest
 ```
 
 [`docker/Dockerfile`](docker/Dockerfile) takes the published `pointcept/pointcept:v1.6.0`
@@ -471,6 +545,12 @@ runs that part in plain PyTorch. `--libs "pointrope pointops2 pointseg"` adds th
 the base image leaves out. The build context is `pointcept/libs/` alone, which keeps
 `weights/` out of it, and the build compiles from *this* checkout rather than the image's
 bundled copy.
+
+The same image installs the Python packages the published one ships without — `peft`, for
+LoRA-style fine-tuning — with `--pip "peft==0.17.0"` to pin them. torch is constrained to
+the exact build already in the image, local `+cuXXX` suffix and all, so pip cannot satisfy
+a dependency by pulling a different torch off PyPI and breaking the ABI the extensions were
+just compiled against.
 
 [`tools/serve_pointcept.sh`](tools/serve_pointcept.sh) then picks `pcit-pointcept:latest` up
 automatically, falling back to the published image if you have not built it. The repo is
@@ -695,8 +775,8 @@ a 200-entry legend.
 
 ## How the conversion works
 
-`src/convert.mjs` reads the PCD, classifies its fields, and hands a set of attributes to
-`src/octree.mjs`, which writes a Potree 2.0 octree: `metadata.json`, `hierarchy.bin`
+`src/scene/convert.mjs` reads the PCD, classifies its fields, and hands a set of attributes to
+`src/octree/write.mjs`, which writes a Potree 2.0 octree: `metadata.json`, `hierarchy.bin`
 (22-byte breadth-first node records) and `octree.bin` (interleaved attributes per node).
 Each node holds a grid-subsampled view of its subtree, so the viewer streams coarse
 detail first.

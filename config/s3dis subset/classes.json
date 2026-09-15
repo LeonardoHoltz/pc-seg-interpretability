@@ -1,0 +1,135 @@
+{
+  "description": "S3DIS (Pointcept preprocessing): segment.npy holds the 13 semantic classes, instance.npy the per-object ids the library is built from",
+  "fields": {
+    "segment": {
+      "name": "Semantic class (S3DIS 13)",
+      "classes": {
+        "-1": {
+          "name": "unlabeled",
+          "color": [
+            95,
+            99,
+            108
+          ]
+        },
+        "0": {
+          "name": "ceiling",
+          "color": [
+            233,
+            229,
+            107
+          ]
+        },
+        "1": {
+          "name": "floor",
+          "color": [
+            95,
+            156,
+            196
+          ]
+        },
+        "2": {
+          "name": "wall",
+          "color": [
+            179,
+            116,
+            81
+          ]
+        },
+        "3": {
+          "name": "beam",
+          "color": [
+            241,
+            149,
+            131
+          ]
+        },
+        "4": {
+          "name": "column",
+          "color": [
+            81,
+            163,
+            148
+          ]
+        },
+        "5": {
+          "name": "window",
+          "color": [
+            77,
+            174,
+            84
+          ]
+        },
+        "6": {
+          "name": "door",
+          "color": [
+            108,
+            135,
+            75
+          ]
+        },
+        "7": {
+          "name": "table",
+          "color": [
+            41,
+            49,
+            101
+          ]
+        },
+        "8": {
+          "name": "chair",
+          "color": [
+            79,
+            79,
+            76
+          ]
+        },
+        "9": {
+          "name": "sofa",
+          "color": [
+            223,
+            52,
+            52
+          ]
+        },
+        "10": {
+          "name": "bookcase",
+          "color": [
+            89,
+            47,
+            95
+          ]
+        },
+        "11": {
+          "name": "board",
+          "color": [
+            81,
+            109,
+            114
+          ]
+        },
+        "12": {
+          "name": "clutter",
+          "color": [
+            233,
+            233,
+            229
+          ]
+        }
+      }
+    },
+    "instance": {
+      "name": "Instance",
+      "classes": {
+        "-1": {
+          "name": "unlabeled",
+          "color": [
+            95,
+            99,
+            108
+          ]
+        }
+      }
+    }
+  }
+}

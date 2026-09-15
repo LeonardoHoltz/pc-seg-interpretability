@@ -12,8 +12,10 @@ import { readCloud } from "../io/cloud.mjs";
 import { describeFields } from "./fields.mjs";
 import { writeOctree } from "../octree/write.mjs";
 import { classColor, UNLABELED_COLOR, UNLABELED_NAMES } from "./palette.mjs";
-import { extractInstances, pickInstanceField } from "../objects/instances.mjs";
-import { cacheDirFor, resolveScene, readSidecar, listScenes, describeScene } from "./registry.mjs";
+import { extractInstances } from "../objects/instances.mjs";
+import { roleMapFrom, mergeRoleMaps, describeRoles } from "./roles.mjs";
+import { sceneThumbnail } from "./thumbnail.mjs";
+import { cacheDirFor, resolveScene, readSidecar, listScenes, describeScene, datasetForId } from "./registry.mjs";
 import { statSync } from "node:fs";
 
 /** Potree's classification LUT has 256 entries. */
@@ -73,12 +75,16 @@ export function convertScene(id, options = {}) {
 
   onProgress({ phase: "analysing", progress: 0, message: "Inspecting fields" });
   const sidecar = readSidecar(pcdPath);
-  // A dataset config can nominate the class field, so a folder of scenes with
-  // several label sets opens on the right one without a flag every time.
-  const described = describeFields(pcd, {
-    classesSidecar: sidecar,
-    primaryField: primaryField ?? sidecar?.primaryField ?? null,
-  });
+  // Which field is the semantic one and which enumerates objects is declared by
+  // the dataset, not guessed at here: the dataset's entry in app.json, then any
+  // classes.json from the dataset root down to this scene, then whatever this
+  // particular request asked for. See scene/roles.mjs.
+  const roles = mergeRoleMaps(
+    roleMapFrom(datasetForId(id)),
+    roleMapFrom(sidecar),
+    { semantic: primaryField ?? undefined, instance: instanceFieldOverride ?? undefined },
+  );
+  const described = describeFields(pcd, { classesSidecar: sidecar, roles });
 
   const { valid, numValid, position, color, scalars, primary } = described;
   if (numValid === 0) throw new Error("every point in this scene has a non-finite coordinate");
@@ -213,7 +219,7 @@ export function convertScene(id, options = {}) {
   // attribute writers, so a library entry colours identically to the scene.
   let library = null;
   if (extractLibrary) {
-    const instanceField = pickInstanceField(described, primary?.name ?? null, instanceFieldOverride);
+    const instanceField = described.roles.instance;
     if (instanceField) {
       onProgress({ phase: "instances", progress: 0, message: "Extracting instances" });
       library = extractInstances({
@@ -237,6 +243,13 @@ export function convertScene(id, options = {}) {
     }
   }
 
+  // ---- the card picture --------------------------------------------------
+  // Drawn from the points that are already in memory, so the scene browser can
+  // show what a scene looks like without loading it.
+  onProgress({ phase: "thumbnail", progress: 0, message: "Drawing the thumbnail" });
+  const [tx, ty, tz] = position.map((f) => f.data);
+  const thumbnail = sceneThumbnail(indices, tx, ty, tz, color ? [color.r, color.g, color.b] : null);
+
   const scene = {
     id,
     name: id.split("/").pop(),
@@ -255,6 +268,8 @@ export function convertScene(id, options = {}) {
     bytesPerPoint: result.bytesPerPoint,
     octreeBytes: result.octreeBytes,
     hasColor: Boolean(color),
+    roles: describeRoles(described.roles),
+    thumbnail,
     attributes: attributeInfo,
     classification,
     library: library
