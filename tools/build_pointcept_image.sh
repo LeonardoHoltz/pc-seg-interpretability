@@ -12,7 +12,7 @@ set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-BASE="${PCIT_POINTCEPT_BASE_IMAGE:-pointcept/pointcept:v1.6.0}"
+BASE="${PCIT_POINTCEPT_BASE_IMAGE:-pointcept/pointcept:v1.6.0-pytorch2.5.0-cuda12.4-cudnn9-devel}"
 TAG="${PCIT_POINTCEPT_IMAGE:-pcit-pointcept:latest}"
 LIBS="pointrope"
 CUDA_ARCH="8.6+PTX"
