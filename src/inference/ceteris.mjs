@@ -16,60 +16,22 @@
  * Nothing is written to the scene: this is analysis, so the octree is read once
  * and never rebuilt.
  */
-import { readFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
-import { readOctree } from "../octree/read.mjs";
 import { encodeArrays, decodeArrays } from "./npbuffer.mjs";
-import { cacheDirFor } from "../scene/registry.mjs";
+import { readSceneForInference, sceneArrays } from "./payload.mjs";
 import { config } from "../config.mjs";
 
 /** Reads the scene once and lays out the arrays the service expects. */
 function prepare(sceneId, fields) {
-  const dir = cacheDirFor(sceneId);
-  const sceneJson = join(dir, "scene.json");
-  if (!existsSync(sceneJson)) throw new Error(`${sceneId} has not been converted yet`);
-  const scene = JSON.parse(readFileSync(sceneJson, "utf8"));
-  const octree = readOctree(dir);
-  const n = octree.count;
-
-  const kindOf = new Map((scene.attributes ?? []).map((a) => [a.name, a.kind]));
-  const arrays = [];
-
-  // xyz as [3, N]; z occupies the last third and is the only part that varies.
-  const xyz = new Float32Array(3 * n);
-  xyz.set(octree.x, 0);
-  xyz.set(octree.y, n);
-  xyz.set(octree.z, 2 * n);
-  arrays.push({ name: "xyz", dtype: "float32", shape: [3, n], data: xyz });
-
-  const rgbCol = octree.columns.get("rgb") ?? octree.columns.get("rgba");
-  if (rgbCol && rgbCol.numElements === 3) {
-    const rgb = new Uint8Array(3 * n);
-    for (let i = 0; i < n; i++) {
-      rgb[i] = rgbCol.data[i * 3];
-      rgb[n + i] = rgbCol.data[i * 3 + 1];
-      rgb[2 * n + i] = rgbCol.data[i * 3 + 2];
-    }
-    arrays.push({ name: "rgb", dtype: "uint8", shape: [3, n], data: rgb });
-  }
-
-  for (const [name, col] of octree.columns) {
-    if (name === "rgb" || name === "rgba" || name === "position") continue;
-    if (col.numElements !== 1) continue;
-    if (fields && !fields.includes(name)) continue;
-    const kind = kindOf.get(name);
-    const categorical = kind === "categorical" || kind === "classification" || name === "classification";
-    const data = categorical ? new Int32Array(n) : new Float32Array(n);
-    for (let i = 0; i < n; i++) data[i] = col.data[i];
-    arrays.push({ name, dtype: categorical ? "int32" : "float32", shape: [n], data });
-  }
-
+  const { scene, octree, n } = readSceneForInference(sceneId);
+  // xyz occupies one array; z is its last third and the only part a sweep moves.
+  const { arrays, xyz } = sceneArrays(scene, octree, { fields });
   return { scene, octree, n, arrays, xyz, baseZ: Float32Array.from(octree.z) };
 }
 
 /** Point indices belonging to one object, via the scene's instance field. */
 function objectIndices(scene, octree, instanceId) {
-  const field = scene.library?.field
+  // The scene says which field enumerates objects; see scene/roles.mjs.
+  const field = scene.roles?.instance?.source ?? scene.library?.field
     ?? (scene.attributes ?? []).find((a) => a.kind === "categorical" && /instance|object/i.test(a.name))?.name;
   const col = octree.columns.get(field) ?? octree.columns.get("instance");
   if (!col) throw new Error("this scene has no instance field, so objects cannot be isolated");

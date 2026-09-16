@@ -50,6 +50,11 @@ export function createInstanceManager({
   const state = {
     library: null,
     groupBy: "class",       // "class" | "scene"
+    openDatasets: null,     // dataset names whose folder is open
+    openScenes: null,       // scene ids whose folder is open; null until first render
+    openClasses: null,      // class keys whose folder is open
+    autoOpened: null,       // the scene id that was opened for you, so it happens once
+    autoOpenedDataset: null,
     filter: "",
     placed: [],             // { uid, entry, pointcloud, pos, yaw, scale, size, anchorLocal, helper }
     selected: null,
@@ -624,7 +629,8 @@ export function createInstanceManager({
 
   function matches(entry, needle) {
     if (!needle) return true;
-    return `${entry.className} ${entry.sceneName} ${entry.id}`.toLowerCase().includes(needle);
+    return `${entry.className} ${entry.sceneName} ${entry.dataset ?? ""} ${entry.id}`
+      .toLowerCase().includes(needle);
   }
 
   function renderLibrary() {
@@ -647,31 +653,196 @@ export function createInstanceManager({
       return;
     }
 
-    const groups = new Map();
+    if (state.groupBy === "scene") renderSceneTree(host, lib, items, needle);
+    else renderClassTree(host, items, needle);
+  }
+
+  /**
+   * One folder header. `depth` is the nesting level and `swatch` a class colour,
+   * for the rows that carry one.
+   */
+  function folderHead({ label, count, open, depth = 0, swatch = null, title = null, onToggle }) {
+    const head = el("div", `lib-group folder depth${depth}${open ? " open" : ""}${count ? "" : " empty"}`);
+    head.appendChild(el("span", "lib-caret", "▸"));
+    if (swatch) {
+      const dot = el("span", "lib-dot");
+      dot.style.background = rgbCss(swatch);
+      head.appendChild(dot);
+    }
+    head.appendChild(el("span", "lib-group-name", label));
+    head.appendChild(el("span", "lib-group-count", String(count)));
+    if (title) head.title = title;
+    head.addEventListener("click", onToggle);
+    return head;
+  }
+
+  /** dataset -> scene -> objects. */
+  function renderSceneTree(host, lib, items, needle) {
+    // Keyed by scene *id*, not name: two datasets can hold a scene0011_00 each
+    // and they are not the same room.
+    const tree = new Map();
+    const scene = (dsName, id, label) => {
+      if (!tree.has(dsName)) tree.set(dsName, new Map());
+      const scenes = tree.get(dsName);
+      if (!scenes.has(id)) scenes.set(id, { label, entries: [], reason: null });
+      return scenes.get(id);
+    };
     for (const entry of items) {
-      const key = state.groupBy === "class" ? entry.className : entry.sceneName;
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key).push(entry);
+      scene(entry.dataset ?? "scenes", entry.sceneId, entry.sceneName).entries.push(entry);
+    }
+    // A converted scene with no objects still gets a folder, so that opening a
+    // scene and finding nothing is answered rather than left as a gap.
+    for (const sc of lib.scenes ?? []) {
+      const dsName = sc.dataset ?? "scenes";
+      if (tree.get(dsName)?.has(sc.id)) continue;
+      if (needle && !`${sc.name} ${dsName} ${sc.id}`.toLowerCase().includes(needle)) continue;
+      scene(dsName, sc.id, sc.name).reason = sc.reason;
     }
 
-    for (const [key, entries] of [...groups].sort((a, b) => b[1].length - a[1].length)) {
-      const head = el("div", "lib-group");
-      const dot = el("span", "lib-dot");
-      dot.style.background = state.groupBy === "class" ? rgbCss(entries[0].classColor) : "#54606e";
-      head.appendChild(dot);
-      head.appendChild(el("span", "lib-group-name", key));
-      head.appendChild(el("span", "lib-group-count", String(entries.length)));
-      host.appendChild(head);
+    renderTree(host, tree, {
+      // Scenes read as folders, so order them like folders: by name.
+      order: (a, b) => a[1].label.localeCompare(b[1].label) || a[0].localeCompare(b[0]),
+      openDefaults: openScenesDefault,
+      openSet: () => state.openScenes,
+      label: (group) => group.label,
+      title: (key) => key,                      // the full id; names repeat
+      leaf: (into, group) => {
+        if (group.entries.length) {
+          for (const entry of group.entries) into.appendChild(renderLibraryItem(entry, { nested: true }));
+        } else if (group.reason) {
+          into.appendChild(el("div", "lib-empty-note", group.reason));
+        }
+      },
+    });
+  }
 
-      for (const entry of entries) host.appendChild(renderLibraryItem(entry));
+  /**
+   * dataset -> class -> objects.
+   *
+   * A class always belongs to one dataset. S3DIS's chair is class 8 and grey,
+   * ScanNet's is class 4 and yellow; the English word agreeing is a coincidence,
+   * so the label space is the outer level rather than something to pool across.
+   */
+  function renderClassTree(host, items) {
+    const tree = new Map();
+    for (const entry of items) {
+      const dsName = entry.dataset ?? "scenes";
+      if (!tree.has(dsName)) tree.set(dsName, new Map());
+      const classes = tree.get(dsName);
+      const key = entry.classKey ?? entry.className;
+      if (!classes.has(key)) {
+        classes.set(key, { label: entry.className, color: entry.classColor, entries: [] });
+      }
+      classes.get(key).entries.push(entry);
+    }
+
+    renderTree(host, tree, {
+      // Classes are a ranking, so the biggest stays on top.
+      order: (a, b) => b[1].entries.length - a[1].entries.length || a[1].label.localeCompare(b[1].label),
+      openDefaults: openClassesDefault,
+      openSet: () => state.openClasses,
+      label: (group) => group.label,
+      swatch: (group) => group.color,
+      leaf: (into, group) => {
+        for (const entry of group.entries) into.appendChild(renderLibraryItem(entry, { nested: true }));
+      },
+    });
+  }
+
+  /**
+   * Draws a dataset -> group -> objects tree. Both levels open and close; the
+   * middle level's identity, order and contents are the caller's business.
+   */
+  function renderTree(host, tree, { order, openDefaults, openSet, label, swatch = null, title = null, leaf }) {
+    const datasets = [...tree].sort((a, b) => a[0].localeCompare(b[0]));
+    openDatasetsDefault(datasets.map(([name]) => name));
+    // Every middle-level key, across datasets, so the defaults see the whole set.
+    openDefaults(datasets.flatMap(([, groups]) => [...groups.keys()]));
+    const groupsOpen = openSet();
+
+    for (const [dsName, groups] of datasets) {
+      const total = [...groups.values()].reduce((n, g) => n + g.entries.length, 0);
+      const dsOpen = state.openDatasets.has(dsName);
+      host.appendChild(folderHead({
+        label: dsName, count: total, open: dsOpen, depth: 0,
+        onToggle: () => {
+          if (state.openDatasets.has(dsName)) state.openDatasets.delete(dsName);
+          else state.openDatasets.add(dsName);
+          renderLibrary();
+        },
+      }));
+      if (!dsOpen) continue;
+
+      for (const [key, group] of [...groups].sort(order)) {
+        const open = groupsOpen.has(key);
+        host.appendChild(folderHead({
+          label: label(group),
+          count: group.entries.length,
+          open, depth: 1,
+          swatch: swatch ? swatch(group) : null,
+          title: title ? title(key) : null,
+          onToggle: () => {
+            if (groupsOpen.has(key)) groupsOpen.delete(key);
+            else groupsOpen.add(key);
+            renderLibrary();
+          },
+        }));
+        if (open) leaf(host, group);
+      }
     }
   }
 
-  function renderLibraryItem(entry) {
+  /**
+   * Which dataset folders start open: the one the scene on screen belongs to,
+   * and a lone dataset always, since wrapping everything in one closed folder
+   * would be friction with nothing to disambiguate.
+   */
+  function openDatasetsDefault(names) {
+    if (state.filter.trim()) { state.openDatasets = new Set(names); return; }
+    if (!state.openDatasets) state.openDatasets = new Set();
+    if (names.length === 1) state.openDatasets.add(names[0]);
+    const here = getSceneInfo()?.id;
+    if (here && here !== state.autoOpenedDataset) {
+      state.autoOpenedDataset = here;
+      const ds = state.library?.instances.find((e) => e.sceneId === here)?.dataset
+        ?? (state.library?.scenes ?? []).find((sc) => sc.id === here)?.dataset;
+      if (ds && names.includes(ds)) state.openDatasets.add(ds);
+    }
+  }
+
+  /**
+   * Which folders are open.
+   *
+   * Filtering is a search, so everything it matched is shown expanded. Otherwise
+   * the scene on screen opens itself -- it is the one whose objects can be
+   * inspected and detached rather than only placed -- and stays open alongside
+   * whatever you opened by hand.
+   *
+   * Each scene is opened for you exactly once, tracked by `autoOpened`: loading
+   * a second scene expands that one too, and a folder you deliberately closed
+   * stays closed instead of springing open on the next render.
+   */
+  function openScenesDefault(keys) {
+    if (state.filter.trim()) { state.openScenes = new Set(keys); return; }
+    if (!state.openScenes) state.openScenes = new Set();
+    const here = getSceneInfo()?.id;
+    if (here && here !== state.autoOpened) {
+      state.autoOpened = here;
+      if (keys.includes(here)) state.openScenes.add(here);
+    }
+  }
+
+  /** Classes start closed -- there are dozens -- unless a filter found them. */
+  function openClassesDefault(keys) {
+    if (state.filter.trim()) { state.openClasses = new Set(keys); return; }
+    if (!state.openClasses) state.openClasses = new Set();
+  }
+
+  function renderLibraryItem(entry, { nested = false } = {}) {
     const info = getSceneInfo();
     const inScene = info && entry.sceneId === info.id && !entry.detached;
 
-    const node = el("div", "lib-item");
+    const node = el("div", `lib-item${nested ? " nested" : ""}`);
     if (inScene) node.classList.add("in-scene");
     if (entry.detached) node.classList.add("detached");
     if (entry.background) node.classList.add("backdrop");
@@ -1414,7 +1585,10 @@ export function createInstanceManager({
 
   // ------------------------------------------------------------- wiring
   $("#library-search").addEventListener("input", (e) => {
+    const had = state.filter.trim();
     state.filter = e.target.value;
+    // A filter expands what it found; clearing it returns to just this scene.
+    if (had && !state.filter.trim()) state.openScenes = null;
     renderLibrary();
   });
   for (const btn of document.querySelectorAll("#library-groupby button")) {

@@ -135,10 +135,26 @@ export function createSegmentation({
       }
       host.appendChild(list);
 
+      // What the scene holds but is deliberately not sending. Saying so is the
+      // point: a gap where `segment` used to be listed looks like a bug.
+      if (p.withheld?.length) {
+        const held = el("div", "seg-withheld");
+        held.appendChild(el("div", "seg-withheld-head", "Not sent"));
+        const chips = el("div", "fields");
+        for (const w of p.withheld) chips.appendChild(el("span", "chip", w.name));
+        held.appendChild(chips);
+        held.appendChild(el("div", "lib-meta",
+          "Only the observations go out: coordinates, colour and normals. A label is an " +
+          "answer, not an input — a service that can see it can score without looking at " +
+          "the geometry, and an interpretability result measured that way says nothing " +
+          "about the model."));
+        host.appendChild(held);
+      }
+
       host.appendChild(el("div", "note",
         "Coordinates go as float32 (3, N) and colour as uint8 (3, N) — three contiguous " +
-        "per-axis arrays, which is already a C-contiguous [3, N] numpy array. Each scalar " +
-        "field goes as its own (N,) array. Nothing is transposed or interleaved."));
+        "per-axis arrays, which is already a C-contiguous [3, N] numpy array. Each normal " +
+        "axis goes as its own (N,) array. Nothing is transposed or interleaved."));
     }
 
     // --- run ---

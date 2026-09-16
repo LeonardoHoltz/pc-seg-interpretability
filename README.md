@@ -298,6 +298,41 @@ unlocking is one click. "Remove all" skips locked objects.
 Dragging an object suppresses the camera orbit for that drag only; dragging empty space
 still orbits as usual.
 
+### Grouping: by class, or by scene
+
+Both views are the same three-level tree, differing only in the middle:
+
+```
+by class                          by scene
+▾ s3dis_subset        (46)        ▾ s3dis_subset            (46)
+  ▾ chair             (17)          ▾ conferenceRoom_1      (46)
+      #14 · conferenceRoom_1            beam #0
+      #18 · conferenceRoom_1            board #1
+  ▸ clutter            (9)          ▸ office_1              (45)
+▸ scannet_subset      (97)        ▸ scannet_subset          (97)
+```
+
+**The dataset is the outer level in both**, because a label space is the thing that makes
+two objects comparable at all. S3DIS's chair is class 8 and grey, ScanNet's is class 4 and
+yellow; `door` is class 6 in one and 7 in the other, with no colour in common. Pooling them
+by the English word would show one dataset's objects under the other's legend.
+
+**Everything folds.** 13 scenes of objects is 445 rows and nobody scrolls that. What opens
+by itself is the path to the scene on screen — its dataset, and the scene inside it, since
+those objects are the ones that can be inspected and detached in place rather than only
+copied. Classes start closed; there are dozens. A lone dataset is always open, as there is
+nothing to disambiguate. Each scene you load opens once, so a folder you deliberately closed
+stays closed instead of springing open on the next render. Typing in the filter opens every
+level it matched, and clearing it returns to the default.
+
+Scene folders are keyed by scene **id**, not name, so two datasets that both contain a
+`scene0011_00` stay separate; the full id is on the folder's tooltip.
+
+**A scene with no objects still gets a folder**, saying why it is empty — ScanNet's test
+split withholds the labels, so there is no instance field to cut objects from. A scene that
+simply vanished from the list would read as a bug in the library rather than a fact about
+the data.
+
 ### Inspecting and detaching what is already in the scene
 
 Objects belonging to the scene you have open are marked **in scene** in the library and
@@ -492,8 +527,20 @@ per-point parsing**:
 | --- | --- | --- |
 | `xyz` | float32 | `(3, N)` |
 | `rgb` | uint8 | `(3, N)` — only if the scene has colour |
-| each continuous field | float32 | `(N,)` |
-| each categorical field | int32 | `(N,)` |
+| `normal_x`, `normal_y`, `normal_z` | float32 | `(N,)` each — only if the scene has normals |
+
+**Only the observations go out.** Coordinates, colour and normals — nothing else. A field
+like `segment`, `instance`, `classification` or a previous `prediction` is an *answer*, not
+an input: a service that can see the ground truth can score perfectly without looking at the
+geometry, and an interpretability result measured that way says nothing about the model. It
+also means the payload does not change shape depending on how well annotated a scene happens
+to be, which is what makes two scenes comparable. The rule lives in one place,
+`src/inference/payload.mjs`, and applies to all three requests — prediction, saliency and
+ceteris paribus.
+
+The payload panel lists what is being held back, so a missing `segment` reads as a decision
+rather than a bug. Normals can still be unticked individually; coordinates and colour
+cannot.
 
 Reply with at least `labels` int32 `(N,)`, in the order the points were sent. `scores`
 float32 `(N,)` and a `class_names` map in the header are used if present. A JSON reply is
@@ -503,7 +550,8 @@ accepted too, for convenience while developing.
 end to end already *are* a C-contiguous `[3, N]` array, so nothing is transposed or
 interleaved on either side — `[N, 3]` would have been the slower choice. Coordinates go as
 float32 rather than float64, halving that array for sub-micron precision on a scene of any
-realistic size. A 422k-point scan with nine fields is a single ~19 MiB POST.
+realistic size. A 760k-point scan is a single ~20 MiB POST — coordinates 8.7 MiB, colour 2.2 MiB, three
+normals 2.9 MiB each.
 
 `examples/segmentation_service.py` is a runnable reference receiver with the decode/encode
 helpers; point the tab at it to try the whole path:
@@ -513,8 +561,8 @@ python examples/segmentation_service.py --port 8500
 ```
 
 The endpoint is typed in the tab and remembered per browser. The tab shows exactly what
-would be sent — every array with its dtype, shape and size — and individual scalar fields
-can be excluded before sending. Confirming rewrites the scene's cached octree to add the
+would be sent — every array with its dtype, shape and size — and normals can be excluded
+before sending. Confirming rewrites the scene's cached octree to add the
 prediction; running again replaces it, and re-converting from the PCD discards it.
 
 Point positions are untouched: the rebuild reuses the octree's existing quantisation grid,

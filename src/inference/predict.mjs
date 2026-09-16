@@ -9,9 +9,9 @@
  * [N] -- is also the fastest one available, because per-axis arrays laid end to
  * end already are a C-contiguous [3, N] array. No transposing happens anywhere.
  */
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { readOctree } from "../octree/read.mjs";
+import { readSceneForInference, sceneArrays, withheldFields } from "./payload.mjs";
 import { rewriteSceneWithAttributes } from "../scene/attributes.mjs";
 import { encodeArrays, decodeArrays } from "./npbuffer.mjs";
 import { classColor, UNLABELED_COLOR, UNLABELED_NAMES } from "../scene/palette.mjs";
@@ -23,55 +23,8 @@ export const PREDICTION_ATTRIBUTE = "prediction";
 
 /** Builds the request body from a scene's octree. */
 export function buildPayload(sceneId, { fields = null } = {}) {
-  const dir = cacheDirFor(sceneId);
-  const sceneJson = join(dir, "scene.json");
-  if (!existsSync(sceneJson)) throw new Error(`${sceneId} has not been converted yet`);
-  const scene = JSON.parse(readFileSync(sceneJson, "utf8"));
-  const octree = readOctree(dir);
-  const n = octree.count;
-
-  const kindOf = new Map((scene.attributes ?? []).map((a) => [a.name, a.kind]));
-  const arrays = [];
-  const described = [];
-
-  // xyz as [3, N]: x, then y, then z, each contiguous.
-  const xyz = new Float32Array(3 * n);
-  xyz.set(octree.x, 0);
-  xyz.set(octree.y, n);
-  xyz.set(octree.z, 2 * n);
-  arrays.push({ name: "xyz", dtype: "float32", shape: [3, n], data: xyz });
-  described.push({ name: "xyz", dtype: "<f4", shape: [3, n], role: "coordinates" });
-
-  // rgb as [3, N]: the octree stores it interleaved, so split it out per channel.
-  const rgbCol = octree.columns.get("rgb") ?? octree.columns.get("rgba");
-  if (rgbCol && rgbCol.numElements === 3) {
-    const rgb = new Uint8Array(3 * n);
-    for (let i = 0; i < n; i++) {
-      rgb[i] = rgbCol.data[i * 3];
-      rgb[n + i] = rgbCol.data[i * 3 + 1];
-      rgb[2 * n + i] = rgbCol.data[i * 3 + 2];
-    }
-    arrays.push({ name: "rgb", dtype: "uint8", shape: [3, n], data: rgb });
-    described.push({ name: "rgb", dtype: "|u1", shape: [3, n], role: "colour" });
-  }
-
-  // One [N] array per scalar field.
-  for (const [name, col] of octree.columns) {
-    if (name === "rgb" || name === "rgba" || name === "position") continue;
-    if (col.numElements !== 1) continue;
-    if (fields && !fields.includes(name)) continue;
-
-    const kind = kindOf.get(name);
-    const categorical = kind === "categorical" || kind === "classification" || name === "classification";
-    const data = categorical ? new Int32Array(n) : new Float32Array(n);
-    for (let i = 0; i < n; i++) data[i] = col.data[i];
-
-    arrays.push({ name, dtype: categorical ? "int32" : "float32", shape: [n], data });
-    described.push({
-      name, dtype: categorical ? "<i4" : "<f4", shape: [n],
-      role: categorical ? "categorical" : "continuous",
-    });
-  }
+  const { scene, octree, n } = readSceneForInference(sceneId);
+  const { arrays, described } = sceneArrays(scene, octree, { fields });
 
   const body = encodeArrays(arrays, {
     scene: sceneId,
@@ -82,12 +35,13 @@ export function buildPayload(sceneId, { fields = null } = {}) {
   return { body, numPoints: n, arrays: described, scene, octree };
 }
 
-/** What would be sent, without sending it. */
+/** What would be sent, without sending it -- and what is being held back. */
 export function previewPayload(sceneId, options = {}) {
-  const { body, numPoints, arrays } = buildPayload(sceneId, options);
+  const { body, numPoints, arrays, scene, octree } = buildPayload(sceneId, options);
   return {
     numPoints,
     bytes: body.length,
+    withheld: withheldFields(scene, octree),
     arrays: arrays.map((a) => ({
       ...a,
       nbytes: a.shape.reduce((x, y) => x * y, 1) *

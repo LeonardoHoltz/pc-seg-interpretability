@@ -32,7 +32,7 @@ import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { WEB_DIR, CACHE_DIR, SCENES_DIR, ROOT } from "./paths.mjs";
 import { config, publicConfig } from "./config.mjs";
-import { listScenes, describeScene, resolveScene, cacheDirFor } from "./scene/registry.mjs";
+import { listScenes, describeScene, resolveScene, cacheDirFor, datasetForId } from "./scene/registry.mjs";
 import { previewPayload } from "./inference/predict.mjs";
 import { sceneThumbnail } from "./scene/thumbnail.mjs";
 import { readOctree } from "./octree/read.mjs";
@@ -334,13 +334,31 @@ function handle(req, res) {
   if (path === "/api/library" && req.method === "GET") {
     const out = [];
     const classes = new Map();
+    // Every converted scene, including the ones that contributed nothing. A
+    // scene that is simply absent from the library looks like a bug -- ScanNet's
+    // test split withholds the labels, so there is nothing to cut objects from,
+    // and the viewer should say that rather than leave a gap.
+    const scenes = [];
 
     for (const scene of listScenes()) {
       if (scene.status !== "ready") continue;
+      const dsEntry = datasetForId(scene.id);
+      const note = (count, reason) => scenes.push({
+        id: scene.id, name: scene.name,
+        dataset: dsEntry?.name ?? "scenes", count, reason,
+      });
+
       const file = join(cacheDirFor(scene.id), "instances.json");
-      if (!existsSync(file)) continue;
+      if (!existsSync(file)) {
+        const hasInstances = Boolean(scene.converted?.roles?.instance);
+        note(0, hasInstances
+          ? "no objects were extracted from this scene"
+          : "no instance field — this scene has no per-object ids to cut objects from");
+        continue;
+      }
       let lib;
-      try { lib = JSON.parse(readFileSync(file, "utf8")); } catch { continue; }
+      try { lib = JSON.parse(readFileSync(file, "utf8")); } catch { note(0, "its object library could not be read"); continue; }
+      note(lib.instances.length, lib.instances.length ? null : "no objects passed the size filter");
 
       // Instances lifted out of the scene are still placeable, but they are no
       // longer sitting in it, so the viewer must not offer to inspect them.
@@ -348,12 +366,21 @@ function handle(req, res) {
       const detached = new Set((scene.converted?.detached ?? []).map((d) => d.instanceId));
       for (const b of scene.converted?.baked ?? []) detached.delete(b.newInstanceId);
 
+      // Class ids mean different things in different label spaces: S3DIS class 8
+      // is a chair, ScanNet class 8 is a door, and even where the *word* agrees
+      // the colour and the id do not. So a class is only ever a class *of a
+      // dataset*, and the library keeps them apart instead of pooling anything
+      // that happens to share a name.
+      const datasetName = dsEntry?.name ?? "scenes";
+
       for (const inst of lib.instances) {
         const className = inst.class?.name ?? "unclassified";
         const entry = {
           key: `${scene.id}#${inst.id}`,
           sceneId: scene.id,
           sceneName: scene.name,
+          dataset: datasetName,
+          classKey: `${datasetName}:${inst.class?.value ?? "?"}`,
           id: inst.id,
           // Backdrops have no instance octree, so there is nothing to spawn.
           url: inst.dir
@@ -373,15 +400,20 @@ function handle(req, res) {
         };
         out.push(entry);
 
-        if (!classes.has(className)) {
-          classes.set(className, { name: className, color: entry.classColor, count: 0 });
+        if (!classes.has(entry.classKey)) {
+          classes.set(entry.classKey, {
+            key: entry.classKey, name: className, dataset: datasetName,
+            value: entry.classValue, color: entry.classColor, count: 0,
+          });
         }
-        classes.get(className).count++;
+        classes.get(entry.classKey).count++;
       }
     }
 
     return sendJson(res, 200, {
       count: out.length,
+      scenes,
+      datasets: [...new Set(out.map((e) => e.dataset))],
       silhouetteSize: 32,
       classes: [...classes.values()].sort((a, b) => b.count - a.count),
       instances: out,
@@ -542,7 +574,15 @@ function handle(req, res) {
   if (m && req.method === "GET") {
     const id = decodeURIComponent(m[1]);
     const file = join(cacheDirFor(id), "instances.json");
-    if (!existsSync(file)) return sendError(res, 404, "this scene has no instance library yet");
+    if (!existsSync(file)) {
+      // Not an error: a scene can legitimately have no objects, and ScanNet's
+      // test split always does. An empty library with a reason is the answer;
+      // a 404 makes the viewer log a failure over a perfectly normal scene.
+      return sendJson(res, 200, {
+        field: null, instances: [], count: 0,
+        reason: "no instance field — this scene has no per-object ids to cut objects from",
+      });
+    }
     return sendFile(req, res, file);
   }
 

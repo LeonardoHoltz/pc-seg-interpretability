@@ -39,6 +39,7 @@ src/
 
   inference/      talking to a segmentation service
     npbuffer.mjs    the binary wire format
+    payload.mjs     what a service is sent -- and what is held back
     predict.mjs     segment the scene, fold labels back in
     saliency.mjs    per-point saliency for one object
     ceteris.mjs     sweep one object through heights, in one request
@@ -136,9 +137,11 @@ store.
   conversion time. `resample.mjs` rebuilds one at a new size with the scene's
   point density. `bake.mjs` merges placed objects into the scene and detaches
   them again.
-- **`inference/`** — `npbuffer.mjs` defines the binary wire format;
-  `predict.mjs`, `saliency.mjs` and `ceteris.mjs` each read the octree, ship the
-  points to a service, and fold the results back in.
+- **`inference/`** — `npbuffer.mjs` defines the binary wire format and
+  `payload.mjs` the one definition of what may go out (coordinates, colour and
+  normals; labels stay behind);  `predict.mjs`, `saliency.mjs` and `ceteris.mjs`
+  each read the octree, ship the points to a service, and fold the results back
+  in.
 - **`scene/attributes.mjs`** is the shared "add a scalar column to a converted
   scene" step used by both `predict` and `saliency`. It reuses the octree's
   existing quantisation grid, so coordinates come out bit-identical on every
