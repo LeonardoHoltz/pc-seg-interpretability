@@ -54,6 +54,27 @@
       <div class="panel-body" id="segmentation-body"></div>
     </div>
 
+    <!-- Its own area under the tabs: what is loose in the scene stays in view
+         whichever tab you are working in. -->
+    <section class="dock collapsed" id="hierarchy-dock">
+      <header id="hierarchy-head" title="The scene, and the objects currently lifted out of it">
+        <span class="caret">▼</span>
+        <h2>Hierarchy</h2>
+        <span class="count" id="hierarchy-count"></span>
+      </header>
+      <div class="dock-body">
+        <div id="object-tree"></div>
+        <div id="transform-content"></div>
+      </div>
+      <div class="dock-foot">
+        <div class="btn-row">
+          <button class="btn small" id="clear-placed">Remove all</button>
+          <button class="btn small primary" id="integrate-placed"
+                  title="Merge every loose object into this scene's octree">Attach all</button>
+        </div>
+      </div>
+    </section>
+
     <div class="panel-foot">
       <code id="scenes-dir" title=""></code>
       <button class="icon-btn" id="refresh-scenes" title="Rescan the scenes folder">⟳</button>
@@ -111,29 +132,6 @@
         <header><span class="caret">▼</span><h2 id="mapping-title">Mapping</h2></header>
         <div class="content" id="mapping-content">
           <div class="empty-note">Load a scene first.</div>
-        </div>
-      </section>
-
-      <section class="section" id="sec-placed">
-        <header>
-          <span class="caret">▼</span><h2>Placed objects</h2>
-          <span class="count" id="placed-count"></span>
-        </header>
-        <div class="content">
-          <div class="ctl">
-          <label><span>Highlight style</span></label>
-          <div class="segmented" id="highlight-style">
-            <button data-style="contour" class="on">Contour</button>
-            <button data-style="box">Bounding box</button>
-          </div>
-        </div>
-        <div id="placed-list"></div>
-          <div id="transform-content"></div>
-          <div class="btn-row" style="margin-top:10px">
-            <button class="btn small" id="clear-placed">Remove all</button>
-            <button class="btn small primary" id="integrate-placed"
-                    title="Merge every placed object into this scene's octree">Integrate into scene</button>
-          </div>
         </div>
       </section>
 

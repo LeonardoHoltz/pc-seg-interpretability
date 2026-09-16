@@ -516,13 +516,72 @@ select:focus, .btn:focus { border-color: var(--accent-dim); }
 .lib-meta { font-size: 10px; color: var(--text-faint); font-family: var(--mono); }
 
 /* ---------------------------------------------------- placed + transform */
-.placed-item {
+/* ---------------------------------------------------- hierarchy tab */
+/* The scene and what is lifted out of it. One row per node, the children
+   indented under the scene, in the shape every editor uses for a hierarchy. */
+.tree-row {
   display: flex; align-items: center; gap: 8px;
-  padding: 5px 7px; border-radius: var(--radius-sm);
-  border: 1px solid transparent; cursor: pointer;
+  padding: 5px 10px; margin: 1px 8px;
+  border: 1px solid transparent; border-radius: var(--radius-sm);
+  cursor: pointer; min-width: 0;
 }
-.placed-item:hover { background: var(--bg-hover); }
-.placed-item.selected { background: rgba(78,158,255,.10); border-color: var(--accent); }
+.tree-row:hover { background: var(--bg-hover); }
+.tree-row.selected { background: rgba(78,158,255,.10); border-color: var(--accent); }
+.tree-row .lib-caret {
+  font-size: 9px; color: var(--text-faint); flex: none;
+  transition: transform .15s ease; display: inline-block; width: 8px;
+}
+.tree-row.open > .lib-caret { transform: rotate(90deg); }
+
+.tree-scene { font-size: 12.5px; font-weight: 500; }
+.tree-icon { font-size: 11px; color: var(--text-faint); flex: none; }
+.tree-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tree-scene .tree-name { flex: 1; min-width: 0; }
+.tree-count { font-family: var(--mono); font-size: 10px; color: var(--text-faint); flex: none; }
+
+/* Children sit under the scene's caret, with a guide line back to it. */
+.tree-child {
+  margin-left: 24px; padding-left: 8px;
+  border-left: 1px solid var(--line-soft); border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+.tree-child .lib-txt { flex: 1; min-width: 0; }
+/* One line each: the panel is narrow and the Attach button shares the row. */
+.tree-child .lib-meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tree-child .tree-name { font-size: 12px; }
+.chip-btn.attach { flex: none; }
+.tree-empty {
+  margin: 2px 8px 2px 32px; padding: 8px 10px;
+  font-size: 10.5px; color: var(--text-faint); line-height: 1.45;
+  background: var(--bg); border: 1px solid var(--line-soft); border-radius: var(--radius);
+}
+
+/* Its own area at the foot of the left panel, not a tab: what is loose in the
+   scene stays visible while you browse scenes, the library or segmentation. */
+.dock {
+  flex: none; display: flex; flex-direction: column; min-height: 0;
+  max-height: 48%; border-top: 1px solid var(--line); background: var(--bg-panel, inherit);
+}
+.dock > header {
+  flex: none; display: flex; align-items: center; gap: 7px;
+  padding: 10px 14px; cursor: pointer; user-select: none;
+}
+.dock > header:hover { background: var(--bg-hover); }
+.dock > header h2 {
+  flex: 1; font-size: 10px; font-weight: 600; letter-spacing: .7px;
+  text-transform: uppercase; color: var(--text-faint); margin: 0;
+}
+.dock > header .caret {
+  font-size: 9px; color: var(--text-faint); transition: transform .15s ease; flex: none;
+}
+.dock > header .count { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+.dock-body { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding-bottom: 6px; }
+.dock-foot { flex: none; padding: 10px 14px; border-top: 1px solid var(--line-soft); }
+
+/* Collapsed: the header alone, so it costs one line when nothing is loose. */
+.dock.collapsed { max-height: none; }
+.dock.collapsed > header .caret { transform: rotate(-90deg); }
+.dock.collapsed .dock-body,
+.dock.collapsed .dock-foot { display: none; }
 
 .transform-head {
   display: flex; align-items: center; gap: 7px;

@@ -345,19 +345,47 @@ get two extra actions:
   that swallows half the scene).
 - **Detach** — lifts the object out of the scene. The scene's octree is rebuilt without its
   points and a movable copy appears in its place, already selected. Move it and use
-  *Integrate into scene* to put it back, or leave it out entirely. Detached objects are
-  greyed out in the library, and re-converting the scene from its PCD restores them.
+  **Attach** in the Hierarchy dock to put it back, or leave it out entirely. Detached objects
+  are greyed out in the library, and re-converting the scene from its PCD restores them.
+
+### The Hierarchy dock
+
+Everything currently *loose* — lifted out of the scene, or dropped in from the library —
+lives in its own area at the foot of the left panel, below the tabs rather than being one
+of them, so it stays in view while you browse scenes, the library or segmentation. It is a
+tree with the scene at the root:
+
+```
+▾ ◳ conferenceRoom_1                          2
+    ● board #1     detached · 16.9, 0.9, 0.8      [⚓ Attach] 🔓 ✕
+    ● tree #3      copy of demo_street · 4.1, …   [⚓ Attach] 🔓 ✕
+```
+
+The scene's *own* objects are deliberately not listed: they are in the octree, not in this
+hierarchy, and the Object library is where they are browsed. What the tree shows is exactly
+what a bake would change — so if it is empty, the scene on disk is what you see.
+
+Each row says where the object came from, because it decides what happens on the way back:
+something **detached** reclaims its original instance id, a **copy** is minted a new one.
+Selecting a row opens the transform controls below it, the same ones the viewport gizmo
+drives.
+
+The dock sits collapsed to a single line while there is nothing in it, and opens itself the
+moment something is lifted out of the scene — that is when it has anything to say. After
+that the header opens and closes it, and the count stays on the header either way.
 
 ### Reloading a scene
 
 Reloading the scene you already have open — which happens after every detach and every
-integrate — is treated as a refresh, not a fresh start. Placed objects stay where they
+attach — is treated as a refresh, not a fresh start. Loose objects stay where they
 are, the camera does not move, and the colour mode is kept. Switching to a *different*
 scene clears placed objects and frames the new cloud as usual.
 
-### Highlight style
+### Selection outline
 
-Selection and inspection outlines come in two styles, switchable in **Placed objects**:
+Selection and inspection outlines come in two styles, switchable as **Selection outline**
+in the Appearance panel's **Rendering** section, next to the other things that decide how
+the scene is drawn:
 
 - **Contour** (default) — follows the convex hull of the object's footprint, drawn at the
   base and at full height. Much tighter than a box for anything round or off-axis.
@@ -446,11 +474,16 @@ is given the *scene's* range instead; the instance's own range cancels out of Po
 normalisation, so identical values come out identically coloured. The categorical ramp is
 built once and shared, so per-class colour edits reach every cloud at the same time.
 
-### Integrating objects into the scene
+### Attaching objects to the scene
 
-The **Integrate into scene** button merges every placed object into the scene's own
-octree, permanently. It asks first, showing how many objects and points are involved,
-a breakdown by class, and what the operation actually does.
+**Attach** on a row in the Hierarchy dock merges that one object into the scene's octree;
+**Attach all** at the foot of the dock does the lot. Either way it asks first, showing how
+many objects and points are involved, a breakdown by class for a batch, and what the
+operation actually does.
+
+Attaching one at a time is not a loop over the batch path — the bake only ever sees the
+placements it is handed, so everything still loose keeps its position, scale and lock while
+the scene reloads underneath it.
 
 Each merged object keeps its class and is given a **new instance id**, so it stays a
 distinct object in the segmentation rather than dissolving into the cloud. Class counts,

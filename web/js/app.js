@@ -930,6 +930,13 @@ function buildRenderPanel() {
     (on) => { r.edl = on; viewer.setEDLEnabled(on); }));
   host.appendChild(toggle("Bounding box", r.bbox,
     (on) => change("bbox", on)));
+
+  // How a selected or inspected object is outlined. A contour follows the convex
+  // hull of the footprint; a box is the plain axis-aligned one, which swallows
+  // half a room for anything long and thin.
+  host.appendChild(dropdown("Selection outline", {
+    contour: "contour", box: "bounding box",
+  }, instances.highlightStyle(), (k) => instances.setHighlightStyle(k)));
 }
 
 function slider(labelText, min, max, step, value, onInput, fmt = String) {

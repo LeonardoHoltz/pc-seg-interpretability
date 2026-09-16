@@ -50,6 +50,8 @@ export function createInstanceManager({
   const state = {
     library: null,
     groupBy: "class",       // "class" | "scene"
+    treeOpen: true,         // the scene node in the hierarchy dock
+    dockFilled: false,      // whether the dock had anything in it last render
     openDatasets: null,     // dataset names whose folder is open
     openScenes: null,       // scene ids whose folder is open; null until first render
     openClasses: null,      // class keys whose folder is open
@@ -308,7 +310,7 @@ export function createInstanceManager({
     if (item.helper) overlayScene.add(item.helper);
     applyTransform(item);
     state.placed.push(item);
-    renderPlacedList();
+    renderObjectTree();
     if (select) selectItem(item);
     return item;
   }
@@ -316,7 +318,7 @@ export function createInstanceManager({
   function toggleLock(item) {
     item.locked = !item.locked;
     applyTransform(item);
-    renderPlacedList();
+    renderObjectTree();
     renderTransformPanel();
   }
   api.toggleLock = toggleLock;
@@ -330,7 +332,7 @@ export function createInstanceManager({
     const j = state.placed.indexOf(item);
     if (j !== -1) state.placed.splice(j, 1);
     if (state.selected === item) selectItem(null);
-    renderPlacedList();
+    renderObjectTree();
   }
 
   api.clearPlaced = ({ force = false } = {}) => {
@@ -353,7 +355,7 @@ export function createInstanceManager({
     for (const p of state.placed) {
       if (p.helper) p.helper.visible = p === item;
     }
-    renderPlacedList();
+    renderObjectTree();
     renderTransformPanel();
 
     if (item) {
@@ -438,7 +440,7 @@ export function createInstanceManager({
 
     // Keep the tool armed so several copies can be dropped in a row.
     state.placing = null;
-    renderPlacedList();
+    renderObjectTree();
     selectItem(item);
     if (state.keepPlacing) beginPlacement(s.entry);
     else { $("#app").classList.remove("placing"); setHint(null); }
@@ -905,23 +907,67 @@ export function createInstanceManager({
   }
 
   // -------------------------------------------------------- placed objects
-  function renderPlacedList() {
-    const host = $("#placed-list");
+  /**
+   * The scene and what is currently lifted out of it, as a tree.
+   *
+   * The root is the scene; its children are the loose objects -- ones detached
+   * from it, and copies dropped in from the library. The scene's *own* objects
+   * are not listed: they are in the octree, not in this hierarchy, and the
+   * library is where they are browsed. What is here is exactly what a bake would
+   * change.
+   */
+  function renderObjectTree() {
+    const host = $("#object-tree");
     if (!host) return;
     host.innerHTML = "";
-    $("#placed-count").textContent = state.placed.length ? String(state.placed.length) : "";
-    const integrateBtn = $("#integrate-placed");
-    if (integrateBtn) integrateBtn.disabled = state.placed.length === 0;
-    const clearBtn = $("#clear-placed");
-    if (clearBtn) clearBtn.disabled = state.placed.length === 0;
 
-    if (state.placed.length === 0) {
-      host.appendChild(el("div", "empty-note", "Nothing placed yet. Pick an object from the Library tab."));
+    const info = getSceneInfo();
+    const attachAll = $("#integrate-placed");
+    const clearAll = $("#clear-placed");
+    if (attachAll) attachAll.disabled = !info || state.placed.length === 0;
+    if (clearAll) clearAll.disabled = state.placed.length === 0;
+
+    // The dock sits collapsed while there is nothing in it, and opens itself the
+    // moment something is lifted out of the scene -- that is when it has
+    // anything to say. After that it is yours to open and close.
+    const dock = $("#hierarchy-dock");
+    const count = $("#hierarchy-count");
+    if (count) count.textContent = state.placed.length ? String(state.placed.length) : "";
+    if (dock && state.placed.length > 0 && !state.dockFilled) dock.classList.remove("collapsed");
+    state.dockFilled = state.placed.length > 0;
+
+    if (!info) {
+      host.appendChild(el("div", "empty-note", "Load a scene first."));
       return;
     }
 
+    // ---- the scene node --------------------------------------------------
+    const root = el("div", `tree-row tree-scene${state.treeOpen ? " open" : ""}`);
+    root.appendChild(el("span", "lib-caret", state.placed.length ? "▸" : " "));
+    root.appendChild(el("span", "tree-icon", "◳"));
+    root.appendChild(el("span", "tree-name", info.name));
+    root.appendChild(el("span", "tree-count",
+      state.placed.length ? String(state.placed.length) : ""));
+    root.title = info.id;
+    root.addEventListener("click", () => {
+      state.treeOpen = !state.treeOpen;
+      selectItem(null);
+      renderObjectTree();
+    });
+    host.appendChild(root);
+
+    if (!state.treeOpen) return;
+
+    if (state.placed.length === 0) {
+      host.appendChild(el("div", "tree-empty",
+        "Nothing is detached. Click an object in the scene to lift it out, or place " +
+        "a copy from the Object library."));
+      return;
+    }
+
+    // ---- one child per loose object --------------------------------------
     for (const item of state.placed) {
-      const row = el("div", "placed-item");
+      const row = el("div", "tree-row tree-child");
       if (item === state.selected) row.classList.add("selected");
 
       const dot = el("span", "lib-dot");
@@ -929,10 +975,24 @@ export function createInstanceManager({
       row.appendChild(dot);
 
       const txt = el("div", "lib-txt");
-      txt.appendChild(el("div", "lib-name", `${item.entry.className} #${item.entry.id}`));
-      txt.appendChild(el("div", "lib-meta",
-        `${item.pos.map((v) => v.toFixed(1)).join(", ")}${item.locked ? " · locked" : ""}`));
+      txt.appendChild(el("div", "tree-name", `${item.entry.className} #${item.entry.id}`));
+      // Where it came from matters: detaching and re-attaching restores an id,
+      // placing a copy mints a new one.
+      const origin = item.detachedFrom != null
+        ? "detached"
+        : (item.entry.sceneId === info.id ? "copy" : `copy of ${item.entry.sceneName}`);
+      const meta = el("div", "lib-meta",
+        `${origin} · ${item.pos.map((v) => v.toFixed(1)).join(", ")}${item.locked ? " · locked" : ""}`);
+      meta.title = item.detachedFrom != null
+        ? `Lifted out of ${info.name}; attaching puts it back with its original id`
+        : `A copy from ${item.entry.sceneName}; attaching gives it a new instance id`;
+      txt.appendChild(meta);
       row.appendChild(txt);
+
+      const attach = el("button", "chip-btn attach", "⚓ Attach");
+      attach.title = `Merge ${item.entry.className} #${item.entry.id} into ${info.name}`;
+      attach.addEventListener("click", (e) => { e.stopPropagation(); integrate([item]); });
+      row.appendChild(attach);
 
       const lock = el("div", `eye lock${item.locked ? " on" : ""}`, item.locked ? "🔒" : "🔓");
       lock.title = item.locked ? "Unlock (L)" : "Lock in place (L)";
@@ -949,9 +1009,9 @@ export function createInstanceManager({
       host.appendChild(row);
     }
   }
-  api.renderPlacedList = renderPlacedList;
+  api.renderObjectTree = renderObjectTree;
   /** Re-renders the panels that depend on which scene is open. */
-  api.refreshView = () => { renderLibrary(); renderPlacedList(); renderTransformPanel(); };
+  api.refreshView = () => { renderLibrary(); renderObjectTree(); renderTransformPanel(); };
 
   function renderTransformPanel() {
     const host = $("#transform-content");
@@ -1039,7 +1099,7 @@ export function createInstanceManager({
       input.disabled = item.locked;
       input.addEventListener("change", () => {
         const v = Number(input.value);
-        if (Number.isFinite(v)) { item.pos[i] = v; applyTransform(item); renderPlacedList(); }
+        if (Number.isFinite(v)) { item.pos[i] = v; applyTransform(item); renderObjectTree(); }
       });
       cell.appendChild(input);
       posRow.appendChild(cell);
@@ -1116,7 +1176,7 @@ export function createInstanceManager({
       if (hit && hit.location) {
         item.pos = [hit.location.x, hit.location.y, hit.location.z];
         applyTransform(item);
-        renderPlacedList();
+        renderObjectTree();
         renderTransformPanel();
         return;
       }
@@ -1215,7 +1275,7 @@ export function createInstanceManager({
       viewer.scene.addPointCloud(pc);
       styleInstance(pc);
       applyTransform(item);
-      renderPlacedList();
+      renderObjectTree();
       renderTransformPanel();
     } catch (err) {
       toast(`Resample failed: ${err.message}`, true);
@@ -1423,7 +1483,7 @@ export function createInstanceManager({
     }
 
     renderTransformPanel();
-    renderPlacedList();
+    renderObjectTree();
   }
   api.inspectInstance = inspectInstance;
 
@@ -1447,8 +1507,8 @@ export function createInstanceManager({
       `${entry.className} #${entry.id} (${fmtInt(entry.points)} points) will be removed from ` +
       `${info.name} and handed to you as a movable object.`));
     body.appendChild(el("p", "modal-lead",
-      "Move it wherever you like, then use Integrate into scene to put it back. " +
-      "Removing it without integrating leaves the scene without it."));
+      "Move it wherever you like, then Attach it in the Hierarchy dock to put it back. " +
+      "Removing it without attaching leaves the scene without it."));
 
     const ok = await confirmDialog({
       title: "Detach object from the scene",
@@ -1468,7 +1528,7 @@ export function createInstanceManager({
       // The scene reload clears placed objects, so put the copy in afterwards.
       const item = await spawn(entry, entry.anchor.slice());
       item.detachedFrom = entry.id;
-      renderPlacedList();
+      renderObjectTree();
       toast(`Detached ${entry.className} #${entry.id} — drag to move it`);
     } catch (err) {
       setHint(null);
@@ -1483,53 +1543,66 @@ export function createInstanceManager({
    * Asks first, because it rewrites the cached octree and cannot be undone
    * from the viewer.
    */
-  async function integrate() {
+  /**
+   * Merges loose objects into the scene's octree.
+   *
+   * @param items  which ones; every loose object by default. Attaching one at a
+   *               time leaves the rest exactly where they are -- the bake only
+   *               ever sees the placements it is handed.
+   */
+  async function integrate(items = state.placed) {
     const info = getSceneInfo();
     if (!info) { toast("Load a scene first", true); return; }
-    if (state.placed.length === 0) { toast("Nothing placed to integrate", true); return; }
+    if (items.length === 0) { toast("Nothing to attach", true); return; }
+    const one = items.length === 1 ? items[0] : null;
 
     // Summarise what is about to be merged.
     const byClass = new Map();
     let points = 0;
-    for (const item of state.placed) {
+    for (const item of items) {
       const k = item.entry.className;
       byClass.set(k, (byClass.get(k) ?? 0) + 1);
       points += item.entry.points;
     }
 
     const body = el("div");
-    body.appendChild(el("p", "modal-lead",
-      `${state.placed.length} object${state.placed.length === 1 ? "" : "s"} ` +
-      `(${fmtInt(points)} points) will become part of ${info.name}.`));
+    body.appendChild(el("p", "modal-lead", one
+      ? `${one.entry.className} #${one.entry.id} (${fmtInt(points)} points) will become part of ${info.name}.`
+      : `${items.length} objects (${fmtInt(points)} points) will become part of ${info.name}.`));
 
-    const list = el("div", "modal-list");
-    for (const [name, n] of [...byClass].sort((a, b) => b[1] - a[1])) {
-      const row = el("div", "modal-row");
-      const dot = el("span", "lib-dot");
-      const sample = state.placed.find((i) => i.entry.className === name);
-      dot.style.background = rgbCss(sample.entry.classColor);
-      row.appendChild(dot);
-      row.appendChild(el("span", "lib-name", name));
-      row.appendChild(el("span", "lib-meta", `× ${n}`));
-      list.appendChild(row);
+    if (!one) {
+      const list = el("div", "modal-list");
+      for (const [name, n] of [...byClass].sort((a, b) => b[1] - a[1])) {
+        const row = el("div", "modal-row");
+        const dot = el("span", "lib-dot");
+        const sample = items.find((i) => i.entry.className === name);
+        dot.style.background = rgbCss(sample.entry.classColor);
+        row.appendChild(dot);
+        row.appendChild(el("span", "lib-name", name));
+        row.appendChild(el("span", "lib-meta", `× ${n}`));
+        list.appendChild(row);
+      }
+      body.appendChild(list);
     }
-    body.appendChild(list);
 
-    const locked = state.placed.filter((i) => i.locked).length;
+    const locked = items.filter((i) => i.locked).length;
+    const staying = state.placed.length - items.length;
     body.appendChild(el("p", "modal-lead",
-      "Each one keeps its class and is given a new instance id, so it stays a " +
-      "distinct object in the segmentation." + (locked ? ` Locked objects (${locked}) are included.` : "")));
+      (one ? "It keeps its class and is given" : "Each one keeps its class and is given") +
+      " a new instance id, so it stays a distinct object in the segmentation." +
+      (locked ? ` Locked objects (${locked}) are included.` : "") +
+      (staying ? ` The other ${staying} stay loose.` : "")));
 
     const ok = await confirmDialog({
-      title: "Integrate objects into the scene",
+      title: one ? "Attach this object to the scene" : "Attach objects to the scene",
       bodyNode: body,
       note: "This rewrites the scene's cached octree. It cannot be undone here, and " +
             "re-converting this scene from its PCD would discard the merged objects.",
-      confirmText: "Integrate",
+      confirmText: "Attach",
     });
     if (!ok) return;
 
-    const placements = state.placed.map((item) => ({
+    const placements = items.map((item) => ({
       sourceSceneId: item.entry.sceneId,
       instanceId: item.entry.id,
       // A resampled object lives in its own octree and already bakes in part of
@@ -1544,19 +1617,36 @@ export function createInstanceManager({
       scale: item.scale / (item.bakedScale ?? 1),
     }));
 
-    setHint(`Integrating ${placements.length} object(s)…`);
+    setHint(one ? `Attaching ${one.entry.className} #${one.entry.id}…`
+                : `Attaching ${placements.length} objects…`);
     try {
       const scene = await runBake(info.id, placements);
-      api.resetPlaced();
+      // Only what was attached goes away; anything still loose keeps its
+      // position, scale and lock across the reload.
+      for (const item of items.slice()) { item.locked = false; removeItem(item); }
       setHint(null);
-      toast(`${placements.length} object(s) merged into ${scene.name}`);
+      toast(one
+        ? `${one.entry.className} #${one.entry.id} attached to ${scene.name}`
+        : `${placements.length} objects attached to ${scene.name}`);
       if (reloadScene) await reloadScene(scene);
     } catch (err) {
       setHint(null);
-      toast(`Integration failed: ${err.message}`, true);
+      toast(`Could not attach: ${err.message}`, true);
     }
   }
   api.integrate = integrate;
+
+  /**
+   * How selection and inspection outlines are drawn: "contour" or "box". The
+   * control lives in the Appearance panel with the other rendering settings;
+   * this is the whole of what it needs.
+   */
+  api.highlightStyle = () => state.highlightStyle;
+  api.setHighlightStyle = (style) => {
+    if (style !== "contour" && style !== "box") return;
+    state.highlightStyle = style;
+    rebuildHighlights();
+  };
 
   function runBake(sceneId, placements, exclude = []) {
     return new Promise((resolve, reject) => {
@@ -1600,19 +1690,13 @@ export function createInstanceManager({
       renderLibrary();
     });
   }
-  for (const btn of document.querySelectorAll("#highlight-style button")) {
-    btn.addEventListener("click", () => {
-      state.highlightStyle = btn.dataset.style;
-      for (const b of document.querySelectorAll("#highlight-style button")) {
-        b.classList.toggle("on", b === btn);
-      }
-      rebuildHighlights();
-    });
-  }
+  $("#hierarchy-head")?.addEventListener("click", () => {
+    $("#hierarchy-dock").classList.toggle("collapsed");
+  });
   $("#clear-placed")?.addEventListener("click", () => api.clearPlaced());
   $("#integrate-placed")?.addEventListener("click", () => integrate());
 
-  renderPlacedList();
+  renderObjectTree();
   renderTransformPanel();
   return api;
 }
