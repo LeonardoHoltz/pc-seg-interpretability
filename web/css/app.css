@@ -40,7 +40,7 @@ html, body {
 /* ---------------------------------------------------------------- layout */
 #app {
   display: grid;
-  grid-template-columns: var(--panel-w) 1fr var(--controls-w);
+  grid-template-columns: var(--panel-w) 5px 1fr 5px var(--controls-w);
   /* A full-width bar carries the tabs; the three panels sit under it. */
   grid-template-rows: auto minmax(0, 1fr);
   height: 100vh; width: 100vw;
@@ -59,9 +59,29 @@ html, body {
   font-size: 13px; font-weight: 600; letter-spacing: .2px; white-space: nowrap;
 }
 
-#app.hide-scenes   { grid-template-columns: 0 1fr var(--controls-w); }
-#app.hide-controls { grid-template-columns: var(--panel-w) 1fr 0; }
-#app.hide-scenes.hide-controls { grid-template-columns: 0 1fr 0; }
+#app.hide-scenes   { grid-template-columns: 0 0px 1fr 5px var(--controls-w); }
+#app.hide-controls { grid-template-columns: var(--panel-w) 5px 1fr 0px 0; }
+#app.hide-scenes.hide-controls { grid-template-columns: 0 0px 1fr 0px 0; }
+
+.resizer {
+  background: var(--line);
+  cursor: col-resize;
+  user-select: none;
+  transition: background .15s;
+  position: relative;
+  z-index: 10;
+}
+/* Widen the hit target without changing visual width */
+.resizer::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  left: -4px; right: -4px;
+  cursor: col-resize;
+}
+.resizer:hover, .resizer.dragging { background: var(--accent-dim); }
+#app.hide-scenes #resizer-left,
+#app.hide-controls #resizer-right { pointer-events: none; overflow: hidden; }
 
 .panel {
   background: var(--bg-panel);

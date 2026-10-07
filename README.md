@@ -14,7 +14,31 @@ For how the code is organised and why, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ---
 
+## Contents
+
+- [Quick start](#quick-start)
+- [Configuration](#configuration)
+  - [Field roles](#field-roles)
+  - [Scene thumbnails](#scene-thumbnails)
+  - [Datasets](#datasets)
+- [Colouring](#colouring)
+  - [Segmentation fields](#segmentation-fields)
+- [Object library](#object-library)
+- [Segmentation inference](#segmentation-inference)
+  - [Wire format](#wire-format)
+  - [Serving a real model: Pointcept](#serving-a-real-model-pointcept)
+  - [Interpretability: ceteris paribus](#interpretability-ceteris-paribus)
+  - [Interpretability: saliency](#interpretability-saliency)
+- [Commands](#commands)
+- [Input formats](#input-formats)
+- [How the conversion works](#how-the-conversion-works)
+- [Layout](#layout)
+
+---
+
 ## Quick start
+
+**Prerequisites:** Node ≥ 20, git (for the Potree build step), Python ≥ 3.10 with numpy.
 
 ```bash
 npm install              # Install dependencies
@@ -27,7 +51,7 @@ npm run serve            # http://127.0.0.1:8080
 python examples/segmentation_service.py --port 8500
 ```
 
-`npm run setup` does the first two together.
+`npm run setup` does install, build-viewer and demo together.
 
 The window is a full-width bar carrying the three tabs — **Scenes**, **Object library** and
 **Segmentation** — with that tab's options in the left panel, the cloud in the middle, and
@@ -605,7 +629,15 @@ so coordinates come out bit-identical.
 
 `examples/segmentation_service.py` is a mock. The real counterpart lives in the
 [`pointcept/`](pointcept/) submodule and serves an actual trained segmentation model over
-the same protocol:
+the same protocol.
+
+Initialise the submodule first (needed once after cloning):
+
+```bash
+git submodule update --init --recursive
+```
+
+Then build the Docker image and start the service:
 
 ```bash
 tools/serve_pointcept.sh                              # random LitePT-small, no weights
@@ -791,7 +823,9 @@ active colour mode.
 
 | Command | What it does |
 | --- | --- |
+| `npm run setup` | full bootstrap: install deps, build Potree, generate demo scene |
 | `npm run serve` | start the viewer (`--port`, `--host`) |
+| `npm run segmentation-example` | start the mock inference service on port 8500 |
 | `npm run scan` | list mapped scenes and their conversion status |
 | `npm run convert -- <scene-id>` | convert one scene (`--force`, `--grid N`, `--primary <field>`, `--instance-field <field>`, `--no-instances`) |
 | `npm run convert -- --all` | convert everything |
