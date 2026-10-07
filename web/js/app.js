@@ -1083,3 +1083,43 @@ for (const section of document.querySelectorAll(".section")) {
 }
 
 refreshScenes();
+
+// --------------------------------------------------------------- panel resize
+{
+  const root = document.documentElement;
+  const VARS = { 'resizer-left': '--panel-w', 'resizer-right': '--controls-w' };
+  const SIDES = { 'resizer-left': 1, 'resizer-right': -1 };
+
+  for (const [id, cssVar] of Object.entries(VARS)) {
+    const saved = localStorage.getItem('pcit-' + id);
+    if (saved) root.style.setProperty(cssVar, saved + 'px');
+
+    document.getElementById(id).addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      const startX = e.clientX;
+      const startVal = parseFloat(getComputedStyle(root).getPropertyValue(cssVar).trim());
+      const sign = SIDES[id];
+      const handle = e.currentTarget;
+
+      handle.classList.add('dragging');
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+
+      const onMove = (ev) => {
+        const val = Math.max(180, Math.min(640, startVal + sign * (ev.clientX - startX)));
+        root.style.setProperty(cssVar, val + 'px');
+      };
+      const onUp = () => {
+        handle.classList.remove('dragging');
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+        const cur = parseFloat(getComputedStyle(root).getPropertyValue(cssVar).trim());
+        localStorage.setItem('pcit-' + id, Math.round(cur));
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+      };
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
+  }
+}

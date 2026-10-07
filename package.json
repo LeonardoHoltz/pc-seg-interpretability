@@ -14,8 +14,8 @@
     "convert": "node src/scene/convert.mjs",
     "demo": "node tools/make_demo_scene.mjs",
     "build-viewer": "node tools/build_viewer.mjs",
-    "setup": "node tools/build_viewer.mjs && node tools/make_demo_scene.mjs",
+    "setup": "npm install && node tools/build_viewer.mjs && node tools/make_demo_scene.mjs",
     "verify": "node tools/verify_octree.mjs",
-    "segmentation-example": "python3 examples/segmentation_service.py"
+    "segmentation-example": "python3 examples/segmentation_service.py --port 8500"
   }
 }
