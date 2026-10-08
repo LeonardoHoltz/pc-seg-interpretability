@@ -913,9 +913,23 @@ above, and the control beat it.
 
 ### Interpretability: saliency
 
-**Compute saliency** asks the service for one scalar per point about the focused object.
-It arrives as a scalar field named `saliency` and behaves like any other — pick it in
-**Colour by**, get a ramp and a min/max range slider.
+**Compute saliency** asks the service for one scalar per point about the focused object,
+by one of the [four methods](#methods). It arrives as a scalar field and behaves like any
+other — pick it in **Colour by**, get a ramp and a min/max range slider.
+
+**One field per (method, object, class).** The attribute is named
+`saliency_<method>_<object>[_c<class>]`, so switching method *adds* a scale rather than
+overwriting the last one — comparing two attributions means having both on the scene at
+once. Re-running the same combination replaces that one, which is what running it again
+means. The Saliency block lists every field the scene carries with a **Colour by** button
+each:
+
+```
+3 saliency fields
+  integrated gradients · chair    object #3 · max 1.000 · 16:44:38   [Colour by]
+  input × gradient · sofa         object #3 · max 1.000 · 16:44:36   [Colour by]
+  integrated gradients · sofa     object #3 · max 1.000 · 16:44:35   [Colour by]
+```
 
 The scene goes out with the same `mask` marking the object, under
 `request: "saliency"`, with the chosen class passed along as `target_class` in case the
@@ -930,9 +944,10 @@ The viewer makes no assumptions: it carries the numbers back, records their rang
 hands them to the colour pipeline. Both reply shapes are accepted, so a method that only
 scores the object costs no more than one that scores the whole cloud.
 
-Each run replaces the previous `saliency` field. `prediction`, `prediction_score` and
-`saliency` coexist happily — they are separate attributes and any of them can be the
-active colour mode.
+`prediction`, `prediction_score` and every saliency field coexist happily — they are
+separate attributes and any of them can be the active colour mode. Each one costs 8 bytes
+per point in the octree, so a scene with a dozen of them is noticeably bigger; re-converting
+the scene clears them all.
 
 ---
 

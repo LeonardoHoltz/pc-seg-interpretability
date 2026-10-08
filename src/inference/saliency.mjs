@@ -17,6 +17,33 @@ import { config } from "../config.mjs";
 
 export const SALIENCY_ATTRIBUTE = "saliency";
 
+/** Short, stable tags for the attribute name; the label carries the long form. */
+const METHOD_TAG = {
+  gradient: "grad",
+  input_x_gradient: "ixg",
+  deeplift: "deeplift",
+  integrated: "ig",
+};
+
+const METHOD_LABEL = {
+  gradient: "gradients",
+  input_x_gradient: "input × gradient",
+  deeplift: "DeepLIFT",
+  integrated: "integrated gradients",
+};
+
+/**
+ * One attribute per (method, object, class).
+ *
+ * Two runs that differ in any of those are different measurements and both are
+ * worth keeping side by side -- switching method should add a scale to colour
+ * by, not quietly overwrite the last one. Re-running the *same* combination
+ * does overwrite, which is what "run it again" means.
+ */
+export const saliencyAttributeName = (method, instanceId, classValue) =>
+  [SALIENCY_ATTRIBUTE, METHOD_TAG[method] ?? method, instanceId,
+   classValue == null ? null : `c${classValue}`].filter((p) => p != null).join("_");
+
 /** Lays out the scene arrays plus a mask for the object under study. */
 function prepare(sceneId, instanceId, fields) {
   const { scene, octree, n } = readSceneForInference(sceneId);
@@ -54,7 +81,7 @@ export async function runSaliency(sceneId, opts = {}) {
   if (!Number.isFinite(instanceId)) throw new Error("an object must be chosen");
 
   onProgress({ phase: "reading", progress: 0.05, message: "Reading the scene" });
-  const { n, arrays, mask, objectPoints } = prepare(sceneId, instanceId, fields);
+  const { scene, n, arrays, mask, objectPoints } = prepare(sceneId, instanceId, fields);
 
   const body = encodeArrays(arrays, {
     request: "saliency",
@@ -120,28 +147,35 @@ export async function runSaliency(sceneId, opts = {}) {
 
   onProgress({ phase: "building", progress: 0.7, message: "Rebuilding the octree" });
   const scoped = incoming.length === objectPoints;
+  const attribute = saliencyAttributeName(method, instanceId, classValue);
+  const className = (scene.prediction?.classes ?? scene.classification?.classes ?? [])
+    .find((c) => c.value === classValue)?.name;
+  const label = `Saliency · ${METHOD_LABEL[method] ?? method} · `
+    + `${className ?? (classValue == null ? "top class" : `class ${classValue}`)} (object #${instanceId})`;
+
   const { scene: updated } = rewriteSceneWithAttributes(sceneId, {
     cacheDir: cacheDirFor(sceneId),
-    add: [{
-      name: SALIENCY_ATTRIBUTE,
-      label: `Saliency · ${method} (object #${instanceId})`,
-      kind: "continuous",
-      values,
-    }],
+    add: [{ name: attribute, label, kind: "continuous", values }],
     onProgress,
   });
 
-  updated.saliency = {
-    endpoint, at: Date.now(),
-    instanceId, classValue, method,
-    objectPoints,
-    scope: scoped ? "object" : "scene",
-    range: [Math.min(...values.slice(0, 1)), 0],
-  };
-  // Record the real range rather than a placeholder.
   let lo = Infinity, hi = -Infinity;
   for (let i = 0; i < n; i++) { if (values[i] < lo) lo = values[i]; if (values[i] > hi) hi = values[i]; }
-  updated.saliency.range = [lo, hi];
+
+  const record = {
+    attribute, label, endpoint, at: Date.now(),
+    instanceId, classValue, className: className ?? null, method,
+    objectPoints,
+    scope: scoped ? "object" : "scene",
+    range: [lo, hi],
+  };
+  // The latest, for anything that wants just one -- and the full set, so the
+  // panel can offer every scale the scene now carries.
+  updated.saliency = record;
+  updated.saliencyRuns = [
+    record,
+    ...(updated.saliencyRuns ?? []).filter((r) => r.attribute !== attribute),
+  ];
 
   const { writeFileSync } = await import("node:fs");
   writeFileSync(join(cacheDirFor(sceneId), "scene.json"), JSON.stringify(updated, null, 2));

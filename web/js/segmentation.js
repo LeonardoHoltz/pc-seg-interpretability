@@ -587,24 +587,32 @@ export function createSegmentation({
 
     if (sal.status) block.appendChild(el("div", "seg-status", sal.status));
 
-    if (info?.saliency) {
-      const dl = el("dl", "kv");
-      dl.style.marginTop = "10px";
-      for (const [k, v] of [
-        ["object", `#${info.saliency.instanceId}`],
-        ["covers", info.saliency.scope === "object" ? "the object" : "whole scene"],
-        ["range", `${info.saliency.range[0].toFixed(3)} – ${info.saliency.range[1].toFixed(3)}`],
-        ["when", new Date(info.saliency.at).toLocaleTimeString()],
-      ]) {
-        dl.appendChild(el("dt", null, k));
-        dl.appendChild(el("dd", null, v));
+    // Every run this scene carries, newest first. A different method, object or
+    // class is a different measurement, so it gets its own scale to colour by
+    // rather than replacing the last one; running the same combination again
+    // replaces that one.
+    const runs = info?.saliencyRuns ?? (info?.saliency ? [info.saliency] : []);
+    if (runs.length) {
+      const list = el("div", "sal-runs");
+      list.appendChild(el("div", "sal-runs-head",
+        runs.length === 1 ? "1 saliency field" : `${runs.length} saliency fields`));
+      for (const r of runs) {
+        const row = el("div", "sal-run");
+        const txt = el("div", "lib-txt");
+        txt.appendChild(el("div", "sal-run-name",
+          `${METHODS[r.method]?.split(" (")[0] ?? r.method ?? "saliency"}`
+          + ` · ${r.className ?? (r.classValue == null ? "top class" : `class ${r.classValue}`)}`));
+        txt.appendChild(el("div", "lib-meta",
+          `object #${r.instanceId} · ${r.range?.[1] != null ? `max ${r.range[1].toFixed(3)}` : ""}`
+          + ` · ${new Date(r.at).toLocaleTimeString()}`));
+        row.appendChild(txt);
+        const show = el("button", "chip-btn", "Colour by");
+        show.title = r.label ?? r.attribute;
+        show.addEventListener("click", () => onSelectAttribute?.(r.attribute ?? "saliency"));
+        row.appendChild(show);
+        list.appendChild(row);
       }
-      block.appendChild(dl);
-
-      const show = el("button", "btn small", "Colour by saliency");
-      show.style.marginTop = "8px";
-      show.addEventListener("click", () => onSelectAttribute?.("saliency"));
-      block.appendChild(show);
+      block.appendChild(list);
     }
     host.appendChild(block);
   }
@@ -888,9 +896,10 @@ export function createSegmentation({
 
       sal.running = false;
       sal.status = "";
-      toast(`Saliency computed for object #${cp.instanceId}`);
+      const added = scene.saliency?.attribute ?? "saliency";
+      toast(`${METHODS[sal.method]?.split(" (")[0] ?? sal.method} saliency ready for object #${cp.instanceId}`);
       if (reloadScene) await reloadScene(scene);
-      onSelectAttribute?.("saliency");
+      onSelectAttribute?.(added);
       await loadPreview(true);
     } catch (err) {
       sal.running = false;
