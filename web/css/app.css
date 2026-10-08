@@ -536,6 +536,49 @@ select:focus, .btn:focus { border-color: var(--accent-dim); }
 .lib-meta { font-size: 10px; color: var(--text-faint); font-family: var(--mono); }
 
 /* ---------------------------------------------------- placed + transform */
+/* ------------------------------------------------------ ablation */
+.abl-result { margin-top: 12px; }
+.abl-frames { display: flex; gap: 6px; }
+.abl-frame { flex: 1; min-width: 0; }
+.abl-frame-title {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 3px;
+  font-size: 10px; color: var(--text-dim); margin-bottom: 3px;
+  min-width: 0; white-space: nowrap;
+}
+.abl-frame-title > :first-child { overflow: hidden; text-overflow: ellipsis; }
+.abl-frame-note { font-size: 9px; color: var(--text-faint); font-family: var(--mono); flex: none; }
+.abl-frame canvas {
+  width: 100%; height: auto; display: block; cursor: grab;
+  background: var(--bg); border: 1px solid var(--line-soft); border-radius: var(--radius-sm);
+}
+.abl-frame canvas:active { cursor: grabbing; }
+
+.abl-legend { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
+.abl-legend-end { font-size: 9.5px; color: var(--text-faint); flex: none; }
+.abl-legend-bar { flex: 1; height: 7px; border-radius: 4px; border: 1px solid var(--line-soft); }
+
+.abl-table {
+  width: 100%; margin-top: 10px; border-collapse: collapse;
+  font-size: 11px; font-family: var(--mono);
+}
+.abl-table th {
+  text-align: right; font-weight: 500; font-size: 9.5px; letter-spacing: .3px;
+  text-transform: uppercase; color: var(--text-faint); padding: 3px 4px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.abl-table th:first-child, .abl-table td:first-child { text-align: left; }
+.abl-table td { text-align: right; padding: 4px; color: var(--text-dim); }
+.abl-when { color: var(--text-faint); text-transform: uppercase; font-size: 9.5px; letter-spacing: .3px; }
+
+.abl-verdict {
+  margin-top: 8px; padding: 7px 9px; font-size: 11px; line-height: 1.45;
+  color: var(--text-dim); background: var(--bg);
+  border: 1px solid var(--line-soft); border-left: 2px solid var(--line);
+  border-radius: var(--radius);
+}
+/* It changed its mind: that is the result, so it gets the accent. */
+.abl-verdict.flipped { color: var(--text); border-left-color: var(--accent); }
+
 /* ---------------------------------------------------- hierarchy tab */
 /* The scene and what is lifted out of it. One row per node, the children
    indented under the scene, in the shape every editor uses for a hierarchy. */

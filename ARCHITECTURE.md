@@ -42,6 +42,7 @@ src/
     payload.mjs     what a service is sent -- and what is held back
     predict.mjs     segment the scene, fold labels back in
     saliency.mjs    per-point saliency for one object
+    ablation.mjs    two class heatmaps, their difference, and what survives it
     ceteris.mjs     sweep one object through heights, in one request
 
   workers/        thin worker_thread entry points, one per long job
@@ -54,6 +55,7 @@ web/              front-end (vendor/potree is generated, not committed)
   js/app.js       viewer, scene browser, colouring, rendering controls
   js/instances.js object library, placement, transforms, inspect and detach
   js/segmentation.js  the segmentation and interpretability tab
+  js/pointview.js small point clouds in a canvas, coloured by a signed scalar
   js/util.js      DOM helpers, thumbnails, modal dialogs
 
 scenes/           your scenes: .pcd files, or folders of .npy arrays

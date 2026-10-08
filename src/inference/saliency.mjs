@@ -46,7 +46,7 @@ function prepare(sceneId, instanceId, fields) {
  */
 export async function runSaliency(sceneId, opts = {}) {
   const {
-    endpoint, instanceId, classValue = null,
+    endpoint, instanceId, classValue = null, method = "input_x_gradient",
     fields = null, timeoutMs = config.inference.timeouts.saliency, onProgress = () => {},
   } = opts;
 
@@ -64,6 +64,8 @@ export async function runSaliency(sceneId, opts = {}) {
       instance: instanceId,
       object_points: objectPoints,
       target_class: classValue,
+      // How the attribution is formed; the service owns the maths.
+      method,
       // Either shape is accepted; the service picks whichever suits it.
       expects: { saliency: [`${n} (whole scene) or ${objectPoints} (masked points)`] },
     },
@@ -122,7 +124,7 @@ export async function runSaliency(sceneId, opts = {}) {
     cacheDir: cacheDirFor(sceneId),
     add: [{
       name: SALIENCY_ATTRIBUTE,
-      label: `Saliency (object #${instanceId})`,
+      label: `Saliency · ${method} (object #${instanceId})`,
       kind: "continuous",
       values,
     }],
@@ -131,7 +133,7 @@ export async function runSaliency(sceneId, opts = {}) {
 
   updated.saliency = {
     endpoint, at: Date.now(),
-    instanceId, classValue,
+    instanceId, classValue, method,
     objectPoints,
     scope: scoped ? "object" : "scene",
     range: [Math.min(...values.slice(0, 1)), 0],

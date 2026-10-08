@@ -28,6 +28,7 @@ For how the code is organised and why, see [ARCHITECTURE.md](ARCHITECTURE.md).
   - [Wire format](#wire-format)
   - [Serving a real model: Pointcept](#serving-a-real-model-pointcept)
   - [Interpretability: ceteris paribus](#interpretability-ceteris-paribus)
+  - [Interpretability: ablation (A minus B)](#interpretability-ablation-a-minus-b)
   - [Interpretability: saliency](#interpretability-saliency)
 - [Commands](#commands)
 - [Input formats](#input-formats)
@@ -52,6 +53,21 @@ python examples/segmentation_service.py --port 8500
 ```
 
 `npm run setup` does install, build-viewer and demo together.
+
+To serve a **real** model instead of the mock, the Pointcept fork is a submodule — so clone
+with it, or fetch it after the fact:
+
+```bash
+git clone --recurse-submodules https://github.com/LeonardoHoltz/pc-seg-interpretability.git
+git submodule update --init --recursive     # if you already cloned without it
+
+docker/build_pointcept_image.sh             # once -> pcit-pointcept:latest
+tools/serve_pointcept.sh --weight model_best.pth
+```
+
+Then point the Segmentation tab at `http://127.0.0.1:8500/`. Full details, including every
+flag and what the service does and deliberately does not do, are in
+[Serving a real model: Pointcept](#serving-a-real-model-pointcept).
 
 The window is a full-width bar carrying the three tabs — **Scenes**, **Object library** and
 **Segmentation** — with that tab's options in the left panel, the cloud in the middle, and
@@ -631,23 +647,34 @@ so coordinates come out bit-identical.
 [`pointcept/`](pointcept/) submodule and serves an actual trained segmentation model over
 the same protocol.
 
-Initialise the submodule first (needed once after cloning):
+Three steps, the first two once each:
 
 ```bash
-git submodule update --init --recursive
+git submodule update --init --recursive    # the fork itself, if you cloned without it
+docker/build_pointcept_image.sh            # -> pcit-pointcept:latest
+tools/serve_pointcept.sh --weight model_best.pth
 ```
 
-Then build the Docker image and start the service:
+`tools/serve_pointcept.sh` on its own serves a randomly initialised LitePT-small, which is
+useful for checking the plumbing and nothing else. Its options:
+
+| flag | |
+| --- | --- |
+| `--weight NAME` | checkpoint in `pointcept/weights/`; a bare filename is enough |
+| `--config PATH` | Pointcept config, relative to `pointcept/` (default: LitePT-v1 small) |
+| `--class-names PATH` | class-name JSON (default: `config/scannet_subset/classes.json`) |
+| `--port N` | host port (default: 8500) |
+| `--device D` | `cuda`, `cuda:N` or `cpu` |
+| `--image REF` | docker image (default: the locally built one, else the published one) |
+| `--allow-shuffle` | keep the backbone's random order shuffling — see below |
+| `--` | everything after this goes straight to `serve_inference.py` |
+
+`GET /` answers with the service, its class count and its device, which is the quickest way
+to tell whether it is up:
 
 ```bash
-tools/serve_pointcept.sh                              # random LitePT-small, no weights
-tools/serve_pointcept.sh --weight exp/.../model_best.pth
-```
-
-Build the image once, first:
-
-```bash
-docker/build_pointcept_image.sh      # -> pcit-pointcept:latest
+curl -s http://127.0.0.1:8500/
+{"service": "pointcept-inference", "num_classes": 20, "device": "cuda"}
 ```
 
 [`docker/Dockerfile`](docker/Dockerfile) takes the published `pointcept/pointcept:v1.6.0`
@@ -765,6 +792,13 @@ press **◎ Pick**, then click the object; Esc cancels. Picking is armed explici
 than always-on, so exploring the scene by clicking objects (which inspects them) never
 quietly retargets an analysis you have already set up.
 
+**Class to track** lists the dataset's classes **by name** — the whole label space from
+`config/<id>/classes.json`, including classes this particular scene does not contain, since
+the model predicts into all of them and "does it become a *lamp* up there?" is a fair
+question in a room with no lamp. The names come from the sidecar at request time, so editing
+`classes.json` is enough; no reconversion. After a segmentation has run the list comes from
+the prediction itself instead, which is the set of ids the model actually returned.
+
 Pick the object, the class and a height sweep (from / to / steps), and the result appears
 as a line chart with a table view beside it. Nothing is written to the scene — this is
 analysis, so the octree is read but never rebuilt.
@@ -793,6 +827,89 @@ model already normalises; the viewer applies the softmax otherwise.
 Sending the scene once rather than once per position is what makes this affordable: a
 nine-step sweep over a 422k-point scan is a single 23 MiB request with 11 MiB back, not
 nine 23 MiB requests. The reply covers only the object rather than the whole cloud.
+
+### Interpretability: ablation (A minus B)
+
+The MNIST version of this experiment takes a handwritten 8, subtracts the attribution
+heatmap for class 3 from the one for class 8, erases the ~90 pixels at the top of the
+difference, and watches the 8 read as a 3. The point-cloud version asks the same thing of
+an object: **attribute it for two classes, subtract the maps, delete the points that argue
+hardest for A over B, and segment the scene again.**
+
+Pick the object, class A ("what it is now"), class B ("what it might become"), a method and
+how many points to take away. The result is three small clouds — attribution for A, for B,
+and A − B with the removed points *absent* — over a shared diverging ramp, blue for "argues
+against" and red for "argues for", with a grey midpoint so "no opinion" recedes. Drag any
+frame to orbit all three. Underneath, the object's mean probability for both classes before
+and after, and the majority label each time: the claim "A turned into B" is a number, not an
+impression.
+
+Nothing is written to the scene. The attributions and the removal live in the panel until
+the next run.
+
+#### Methods
+
+**Class to track** and the ablation both offer three ways of forming an attribution,
+selected per run:
+
+| method | what it computes | reference |
+| --- | --- | --- |
+| gradients | `∂score/∂input` — sensitivity alone | none |
+| input × gradient | `input · ∂score/∂input` — sensitivity weighted by the signal present | none |
+| DeepLIFT | `(input − reference) · ∂score/∂input`, the Rescale rule's single-reference linear form | noise cloud |
+| integrated gradients | the gradient averaged along reference → input, times the difference | noise cloud |
+
+Gradients and input × gradient are **not** the same method, though they are often spoken of
+together: the first asks how much the score would move if the point's input moved, the
+second weights that by what the input actually is — so a point with near-zero features
+scores near zero however sensitive the model is to it. Saliency defaults to input × gradient,
+which is what it has always computed.
+
+The reference is **a noise cloud of the same point count**, built inside the service from
+the scene's own per-channel statistics with a fixed seed. It never crosses the network —
+the request names the baseline, the service makes it.
+
+DeepLIFT here is *not* Captum's layer-wise propagation. Captum runs the input and the
+reference as a batch of two along dim 0, and in a point cloud dim 0 is **points**, not
+scenes: it would concatenate two clouds into one and attribute the result. The two agree
+where the model is locally linear; integrated gradients is the honest check, and on this
+model it is also the one that works — see below.
+
+#### What it found
+
+On ScanNet `val/scene0019_00`, sofa #3 (6,331 points), LitePT-small, attributing over
+coordinates *and* features:
+
+Every method, both directions, 3,000 of 6,331 points removed. The **control** removes the
+points the same map ranks *least* sofa-ish; a method whose ranking means something should
+hurt far more in the first direction than the second.
+
+| method | P(sofa) drop, sofa−chair | control | separation |
+| --- | --- | --- | --- |
+| gradients | −0.028 | −0.017 | 1.6× |
+| input × gradient | −0.037 | −0.009 | 4.2× |
+| DeepLIFT | −0.015 | −0.017 | **0.9×** |
+| integrated gradients | −0.048 | −0.009 | **5.5×** |
+
+The control is what makes this readable. **Integrated gradients ranks best** — removing the
+points it calls sofa-ish costs five and a half times what removing the ones it calls
+chair-ish does. **DeepLIFT's single-backward form does not rank at all**: at 0.9× it is
+indistinguishable from its own opposite, and that is not noise — repeat runs of this model
+differ by ~10⁻³ on logits, two orders below the gap between 0.9× and 5.5×. So the ablation
+defaults to integrated gradients and warns when you pick DeepLIFT. All four stay selectable;
+the comparison is the point.
+
+And the headline: **the sofa does not become a chair.** Pushed to 5,000 of 6,331 points,
+P(sofa) falls 0.97 → 0.44 while P(chair) only ever reaches 2×10⁻³, and the majority label
+never changes. Removing the evidence for *sofa* destroys sofa-ness without manufacturing
+chair-ness. Unlike an 8 and a 3, which share most of their strokes, the two classes do not
+sit on a shared manifold for this model — and a sofa with four fifths of its points gone is
+a sparse blob, not a chair.
+
+Attribution defaults to `both` (geometry and features) for this experiment rather than the
+server's `--saliency-input`: removing a point takes away its position as well as its colour,
+and a colour-only ranking measurably did not rank — it was the first version of the table
+above, and the control beat it.
 
 ### Interpretability: saliency
 
