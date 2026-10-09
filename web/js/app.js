@@ -11,6 +11,7 @@ import {
 } from "./util.js";
 import { createInstanceManager } from "./instances.js";
 import { createSegmentation } from "./segmentation.js";
+import { divergingColor } from "./pointview.js";
 
 // ------------------------------------------------------------------- state
 const state = {
@@ -52,7 +53,34 @@ viewer.useHQ = false;
 /** Potree bundles its own three.js and does not expose it, so borrow the Color type. */
 const ThreeColor = Potree.Gradients.SPECTRAL[0][1].constructor;
 
-const GRADIENTS = ["SPECTRAL", "VIRIDIS", "PLASMA", "INFERNO", "TURBO", "RAINBOW", "YELLOW_GREEN", "GRAYSCALE"];
+/**
+ * A diverging ramp for signed fields, built from the same function the ablation
+ * frames use so a saliency map reads identically in both places.
+ *
+ * Signed data needs two hues meeting at a neutral: one hue light-to-dark would
+ * make "argues against" and "argues for" look like more and less of the same
+ * thing. Blue and red with grey between them; the grey sits near the panel's
+ * own background so a point that means nothing recedes into it. The poles were
+ * checked against this surface for colour-vision separation rather than picked
+ * by eye.
+ */
+Potree.Gradients.DIVERGING = Array.from({ length: 17 }, (_, i) => {
+  const t = -1 + (2 * i) / 16;
+  const [r, g, b] = divergingColor(t);
+  return [i / 16, new ThreeColor(r / 255, g / 255, b / 255)];
+});
+
+const GRADIENTS = ["DIVERGING", "SPECTRAL", "VIRIDIS", "PLASMA", "INFERNO", "TURBO", "RAINBOW", "YELLOW_GREEN", "GRAYSCALE"];
+
+/** Does this field carry both signs, so that zero is a meaningful midpoint? */
+const isSigned = (opt) => Number.isFinite(opt?.min) && Number.isFinite(opt?.max)
+  && opt.min < 0 && opt.max > 0;
+
+/** The symmetric range that puts zero exactly at a diverging ramp's midpoint. */
+function symmetricRange(opt) {
+  const m = Math.max(Math.abs(opt.min ?? 0), Math.abs(opt.max ?? 0)) || 1;
+  return [-m, m];
+}
 
 /** Instance library: browse extracted objects, spawn them, move them around. */
 const instances = createInstanceManager({
@@ -574,12 +602,26 @@ function selectAttribute(opt) {
   buildMappingPanel(opt);
 }
 
+/**
+ * Per-attribute colouring: every scalar in the list keeps its own ramp and its
+ * own range, remembered while the scene stays open, so switching between two
+ * saliency fields does not carry one's mapping onto the other.
+ */
 function attrStateFor(opt) {
   const key = opt.potreeName;
   if (!state.attrState.has(key)) {
+    // A field that spans zero opens on the diverging ramp, with a range
+    // symmetric about zero -- Potree maps [lo, hi] linearly onto the ramp, so
+    // an asymmetric range puts the neutral colour somewhere other than zero and
+    // the picture quietly lies about which points argue which way.
+    const signed = isSigned(opt);
+    // A field may say where it wants the ramp to open -- saliency does, because
+    // scaling it to its own extremes shows one grey cloud.
+    const opening = opt.displayRange
+      ?? (signed ? symmetricRange(opt) : [opt.min ?? 0, opt.max ?? 1]);
     state.attrState.set(key, {
-      gradient: opt.kind === "categorical" ? null : "SPECTRAL",
-      range: [opt.min ?? 0, opt.max ?? 1],
+      gradient: opt.kind === "categorical" ? null : (signed ? "DIVERGING" : "SPECTRAL"),
+      range: opening.slice(),
     });
   }
   return state.attrState.get(key);
@@ -823,7 +865,9 @@ function buildScalarPanel(host, opt) {
   }
 
   // value range
-  const lo = opt.min ?? 0, hi = opt.max ?? 1;
+  const signed = isSigned(opt);
+  const lo = signed ? symmetricRange(opt)[0] : (opt.min ?? 0);
+  const hi = signed ? symmetricRange(opt)[1] : (opt.max ?? 1);
   const ctl = el("div", "ctl");
   const label = el("label");
   label.appendChild(el("span", null, "Value range"));
@@ -843,6 +887,23 @@ function buildScalarPanel(host, opt) {
   readout.appendChild(el("span", null, fmtNum(lo)));
   readout.appendChild(el("span", null, fmtNum(hi)));
   ctl.appendChild(readout);
+
+  // Dragging the handles freely is useful, but it moves zero off the ramp's
+  // neutral point; one click puts it back.
+  if (signed) {
+    const centre = el("button", "btn small", "Centre on 0");
+    centre.style.marginTop = "6px";
+    centre.title = "Make the range symmetric, so the neutral colour means zero";
+    centre.addEventListener("click", () => {
+      st.range = opt.displayRange ? opt.displayRange.slice() : symmetricRange(opt);
+      applyToAll();
+      buildMappingPanel(opt);
+    });
+    ctl.appendChild(centre);
+    ctl.appendChild(el("div", "lib-meta",
+      "Signed field: blue argues against, red argues for, grey is no opinion. "
+      + "Zero sits in the middle only while the range stays symmetric."));
+  }
 
   const reset = el("button", "btn small", "Reset range");
   reset.addEventListener("click", () => {

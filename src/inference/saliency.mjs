@@ -17,6 +17,33 @@ import { config } from "../config.mjs";
 
 export const SALIENCY_ATTRIBUTE = "saliency";
 
+/** Short, stable tags for the attribute name; the label carries the long form. */
+const METHOD_TAG = {
+  gradient: "grad",
+  input_x_gradient: "ixg",
+  deeplift: "deeplift",
+  integrated: "ig",
+};
+
+const METHOD_LABEL = {
+  gradient: "gradients",
+  input_x_gradient: "input × gradient",
+  deeplift: "DeepLIFT",
+  integrated: "integrated gradients",
+};
+
+/**
+ * One attribute per (method, object, class).
+ *
+ * Two runs that differ in any of those are different measurements and both are
+ * worth keeping side by side -- switching method should add a scale to colour
+ * by, not quietly overwrite the last one. Re-running the *same* combination
+ * does overwrite, which is what "run it again" means.
+ */
+export const saliencyAttributeName = (method, instanceId, classValue) =>
+  [SALIENCY_ATTRIBUTE, METHOD_TAG[method] ?? method, instanceId,
+   classValue == null ? null : `c${classValue}`].filter((p) => p != null).join("_");
+
 /** Lays out the scene arrays plus a mask for the object under study. */
 function prepare(sceneId, instanceId, fields) {
   const { scene, octree, n } = readSceneForInference(sceneId);
@@ -46,7 +73,7 @@ function prepare(sceneId, instanceId, fields) {
  */
 export async function runSaliency(sceneId, opts = {}) {
   const {
-    endpoint, instanceId, classValue = null,
+    endpoint, instanceId, classValue = null, method = "input_x_gradient",
     fields = null, timeoutMs = config.inference.timeouts.saliency, onProgress = () => {},
   } = opts;
 
@@ -54,7 +81,7 @@ export async function runSaliency(sceneId, opts = {}) {
   if (!Number.isFinite(instanceId)) throw new Error("an object must be chosen");
 
   onProgress({ phase: "reading", progress: 0.05, message: "Reading the scene" });
-  const { n, arrays, mask, objectPoints } = prepare(sceneId, instanceId, fields);
+  const { scene, n, arrays, mask, objectPoints } = prepare(sceneId, instanceId, fields);
 
   const body = encodeArrays(arrays, {
     request: "saliency",
@@ -64,6 +91,8 @@ export async function runSaliency(sceneId, opts = {}) {
       instance: instanceId,
       object_points: objectPoints,
       target_class: classValue,
+      // How the attribution is formed; the service owns the maths.
+      method,
       // Either shape is accepted; the service picks whichever suits it.
       expects: { saliency: [`${n} (whole scene) or ${objectPoints} (masked points)`] },
     },
@@ -118,28 +147,46 @@ export async function runSaliency(sceneId, opts = {}) {
 
   onProgress({ phase: "building", progress: 0.7, message: "Rebuilding the octree" });
   const scoped = incoming.length === objectPoints;
+  const attribute = saliencyAttributeName(method, instanceId, classValue);
+  const className = (scene.prediction?.classes ?? scene.classification?.classes ?? [])
+    .find((c) => c.value === classValue)?.name;
+  const label = `Saliency · ${METHOD_LABEL[method] ?? method} · `
+    + `${className ?? (classValue == null ? "top class" : `class ${classValue}`)} (object #${instanceId})`;
+
+  // Attribution is long-tailed: a handful of points an order of magnitude above
+  // the rest, and everything else near zero. Scaled to the peak, the whole
+  // cloud opens as one neutral grey. So record a robust span alongside the true
+  // one and let the viewer open on that; the full range is still a drag away.
+  const magnitudes = Array.from(values, Math.abs).sort((a, b) => a - b);
+  const p98 = magnitudes[Math.floor(magnitudes.length * 0.98)] || magnitudes.at(-1) || 1;
+
   const { scene: updated } = rewriteSceneWithAttributes(sceneId, {
     cacheDir: cacheDirFor(sceneId),
     add: [{
-      name: SALIENCY_ATTRIBUTE,
-      label: `Saliency (object #${instanceId})`,
-      kind: "continuous",
-      values,
+      name: attribute, label, kind: "continuous", values,
+      displayRange: [-p98, p98],
     }],
     onProgress,
   });
 
-  updated.saliency = {
-    endpoint, at: Date.now(),
-    instanceId, classValue,
-    objectPoints,
-    scope: scoped ? "object" : "scene",
-    range: [Math.min(...values.slice(0, 1)), 0],
-  };
-  // Record the real range rather than a placeholder.
   let lo = Infinity, hi = -Infinity;
   for (let i = 0; i < n; i++) { if (values[i] < lo) lo = values[i]; if (values[i] > hi) hi = values[i]; }
-  updated.saliency.range = [lo, hi];
+
+  const record = {
+    attribute, label, endpoint, at: Date.now(),
+    instanceId, classValue, className: className ?? null, method,
+    displayRange: [-p98, p98],
+    objectPoints,
+    scope: scoped ? "object" : "scene",
+    range: [lo, hi],
+  };
+  // The latest, for anything that wants just one -- and the full set, so the
+  // panel can offer every scale the scene now carries.
+  updated.saliency = record;
+  updated.saliencyRuns = [
+    record,
+    ...(updated.saliencyRuns ?? []).filter((r) => r.attribute !== attribute),
+  ];
 
   const { writeFileSync } = await import("node:fs");
   writeFileSync(join(cacheDirFor(sceneId), "scene.json"), JSON.stringify(updated, null, 2));

@@ -10,6 +10,7 @@
  * service as one binary body.
  */
 import { $, el, fmtInt, fmtBytes, fetchJson, toast, confirmDialog, encId } from "./util.js";
+import { drawPointView, orbitable, rampCss } from "./pointview.js";
 
 const ENDPOINT_KEY = "pcit.segmentation.endpoint";
 
@@ -33,7 +34,20 @@ export function createSegmentation({
       running: false, status: "", result: null, view: "chart",
     },
     // Saliency: one scalar per point, aggregated however the service sees fit.
-    sal: { running: false, status: "" },
+    // The service's own catalogue of loadable models.
+    models: { list: null, active: null, classNames: null, switching: false, error: null },
+    sal: { running: false, status: "", method: "input_x_gradient" },
+    // The ablation experiment: two class heatmaps, their difference, and the
+    // object re-segmented without the points at the top of it.
+    abl: {
+      // Integrated gradients by default, not DeepLIFT. Measured on LitePT /
+      // ScanNet with the ranking's own reverse as a control, removing 3000 of
+      // 6331 points: gradients 1.6x, input x gradient 4.2x, DeepLIFT 0.9x,
+      // integrated 5.5x. The single-backward form is no better than reversing
+      // it. All four stay selectable.
+      running: false, status: "", method: "integrated",
+      classA: null, classB: null, remove: 200, result: null, yaw: 0.6, pitch: 0.35,
+    },
   };
 
   try {
@@ -80,11 +94,15 @@ export function createSegmentation({
     ep.addEventListener("change", () => {
       state.endpoint = ep.value.trim();
       try { localStorage.setItem(ENDPOINT_KEY, state.endpoint); } catch { /* ignore */ }
+      state.models = { list: null, active: null, classNames: null, switching: false, error: null };
+      loadModels();
     });
     epCtl.appendChild(ep);
     host.appendChild(epCtl);
     host.appendChild(el("div", "lib-meta",
       "The server posts the points there and waits for the labels."));
+
+    renderModels(host);
 
     // --- what will be sent ---
     const head = el("div", "seg-head");
@@ -435,7 +453,8 @@ export function createSegmentation({
     host.appendChild(objCtl);
 
     // --- class ---
-    const classes = info?.prediction?.classes ?? null;
+    const classes = classChoices(info);
+
     const clsCtl = el("div", "ctl");
     const clsLabel = el("label");
     clsLabel.appendChild(el("span", null, "Class to track"));
@@ -443,15 +462,26 @@ export function createSegmentation({
     if (classes && classes.length) {
       const clsSel = el("select");
       for (const c of classes) {
-        const o = el("option", null, `${c.name} (${c.value})`);
+        const o = el("option", null, c.name);
         o.value = String(c.value);
         if (c.value === cp.classValue) o.selected = true;
         clsSel.appendChild(o);
       }
-      if (cp.classValue == null) cp.classValue = classes[0].value;
+      if (cp.classValue == null) cp.classValue = defaultClass(classes);
       clsSel.addEventListener("change", () => { cp.classValue = Number(clsSel.value); });
       clsCtl.appendChild(clsSel);
-    } else {
+      // Before a run the names come from the scene's own labels. Usually that is
+      // the same label space the service was handed via --class-names, but it is
+      // the dataset's word for the id, not the model's, so say which it is.
+      const src = classSource(info);
+      clsCtl.appendChild(el("div", "lib-meta",
+        src.kind === "model"
+          ? `The ${classes.length} classes of the loaded model (${src.label}). `
+            + "Switching model switches this list."
+          : src.kind === "prediction"
+            ? `The ${classes.length} classes the last prediction returned.`
+            : `No service reachable, so these are this scene's own ${src.label ?? "class"} `
+              + "labels — the model may use a different label space."));    } else {
       const num = el("input");
       num.type = "number"; num.step = "1"; num.min = "0";
       num.value = String(cp.classValue ?? 0);
@@ -459,7 +489,8 @@ export function createSegmentation({
       num.addEventListener("change", () => { cp.classValue = Number(num.value); });
       clsCtl.appendChild(num);
       clsCtl.appendChild(el("div", "lib-meta",
-        "Run a segmentation once and the class names appear here."));
+        "This scene has no class names, so the class is its raw id. Run a " +
+        "segmentation and the names come back with it."));
     }
     host.appendChild(clsCtl);
 
@@ -531,6 +562,7 @@ export function createSegmentation({
     }
 
     renderSaliency(host);
+    renderAblation(host);
   }
 
   /**
@@ -550,6 +582,8 @@ export function createSegmentation({
       "One scalar per point for the focused object. The service decides what it " +
       "measures and how it is aggregated; it arrives as a scalar field in Colour by."));
 
+    block.appendChild(methodSelect(sal.method, (m) => { sal.method = m; }));
+
     const run = el("button", "btn", "Compute saliency");
     run.style.marginTop = "8px";
     run.disabled = sal.running || cp.running || state.running || cp.instanceId == null;
@@ -558,26 +592,342 @@ export function createSegmentation({
 
     if (sal.status) block.appendChild(el("div", "seg-status", sal.status));
 
-    if (info?.saliency) {
-      const dl = el("dl", "kv");
-      dl.style.marginTop = "10px";
-      for (const [k, v] of [
-        ["object", `#${info.saliency.instanceId}`],
-        ["covers", info.saliency.scope === "object" ? "the object" : "whole scene"],
-        ["range", `${info.saliency.range[0].toFixed(3)} – ${info.saliency.range[1].toFixed(3)}`],
-        ["when", new Date(info.saliency.at).toLocaleTimeString()],
-      ]) {
-        dl.appendChild(el("dt", null, k));
-        dl.appendChild(el("dd", null, v));
-      }
-      block.appendChild(dl);
+    // Every run this scene carries, newest first. A different method, object or
+    // class is a different measurement, so it gets its own scale to colour by
+    // rather than replacing the last one; running the same combination again
+    // replaces that one.
+    const runs = info?.saliencyRuns ?? (info?.saliency ? [info.saliency] : []);
+    if (runs.length) {
+      const list = el("div", "sal-runs");
+      const head = el("div", "sal-runs-head");
+      head.appendChild(el("span", null,
+        runs.length === 1 ? "1 saliency field" : `${runs.length} saliency fields`));
+      // They accumulate on purpose, so there has to be a way to take them off
+      // again -- each one is 8 bytes a point in the octree.
+      const clearAll = el("button", "link-btn", "clear all");
+      clearAll.title = "Remove every analysis field from this scene";
+      clearAll.disabled = sal.running || cp.running || state.running || state.abl.running;
+      clearAll.addEventListener("click", () => dropAttributes(null, runs.length));
+      head.appendChild(clearAll);
+      list.appendChild(head);
+      for (const r of runs) {
+        const row = el("div", "sal-run");
+        const txt = el("div", "lib-txt");
+        txt.appendChild(el("div", "sal-run-name",
+          `${METHODS[r.method]?.split(" (")[0] ?? r.method ?? "saliency"}`
+          + ` · ${r.className ?? (r.classValue == null ? "top class" : `class ${r.classValue}`)}`));
+        txt.appendChild(el("div", "lib-meta",
+          `object #${r.instanceId} · ${r.range?.[1] != null ? `max ${r.range[1].toFixed(3)}` : ""}`
+          + ` · ${new Date(r.at).toLocaleTimeString()}`));
+        row.appendChild(txt);
+        const show = el("button", "chip-btn", "Colour by");
+        show.title = r.label ?? r.attribute;
+        show.addEventListener("click", () => onSelectAttribute?.(r.attribute ?? "saliency"));
+        row.appendChild(show);
 
-      const show = el("button", "btn small", "Colour by saliency");
-      show.style.marginTop = "8px";
-      show.addEventListener("click", () => onSelectAttribute?.("saliency"));
-      block.appendChild(show);
+        const drop = el("button", "eye", "✕");
+        drop.title = `Remove ${r.label ?? r.attribute} from the scene`;
+        drop.disabled = sal.running || cp.running || state.running || state.abl.running;
+        drop.addEventListener("click", () => dropAttributes([r.attribute], 1));
+        row.appendChild(drop);
+        list.appendChild(row);
+      }
+      block.appendChild(list);
     }
     host.appendChild(block);
+  }
+
+  /**
+   * The ablation experiment.
+   *
+   * Attribute the object for two classes, subtract the maps, take away the
+   * points that argue hardest for the first, and segment it again. The MNIST
+   * version erases pixels from an 8 until the network reads a 3; the question
+   * here is whether a sofa stops being a sofa once the sofa-ish points are
+   * gone, and the answer is the pair of numbers under the third frame.
+   */
+  function renderAblation(host) {
+    const info = getSceneInfo();
+    const cp = state.cp;
+    const abl = state.abl;
+    const classes = classChoices(info);
+
+    const block = el("div", "seg-block");
+    block.appendChild(el("div", "seg-head-plain", "Ablation: A minus B"));
+    block.appendChild(el("div", "lib-meta",
+      "Two heatmaps for the focused object, their difference, and the object " +
+      "re-segmented without the points at the top of it."));
+
+    if (!classes?.length) {
+      block.appendChild(el("div", "lib-meta", "This scene has no class names yet."));
+      host.appendChild(block);
+      return;
+    }
+    if (abl.classA == null) abl.classA = defaultClass(classes);
+    if (abl.classB == null) {
+      abl.classB = (classes.find((c) => c.value >= 0 && c.value !== abl.classA) ?? classes[0]).value;
+    }
+
+    const classPicker = (label, current, onChange) => {
+      const ctl = el("div", "ctl");
+      const lab = el("label");
+      lab.appendChild(el("span", null, label));
+      ctl.appendChild(lab);
+      const sel = el("select");
+      for (const c of classes) {
+        const o = el("option", null, c.name);
+        o.value = String(c.value);
+        if (c.value === current) o.selected = true;
+        sel.appendChild(o);
+      }
+      sel.addEventListener("change", () => { onChange(Number(sel.value)); render(); });
+      ctl.appendChild(sel);
+      return ctl;
+    };
+    block.appendChild(classPicker("Class A — what it is now", abl.classA, (v) => { abl.classA = v; }));
+    block.appendChild(classPicker("Class B — what it might become", abl.classB, (v) => { abl.classB = v; }));
+    block.appendChild(methodSelect(abl.method, (m) => { abl.method = m; }));
+    if (abl.method === "deeplift") {
+      block.appendChild(el("div", "lib-meta",
+        "Note: on LitePT/ScanNet this ranking scored 0.9× against its own " +
+        "opposite — no better than reversing it. Integrated gradients scored 5.5×."));
+    }
+
+    const objectPoints = cp.instances?.find((i) => i.id === cp.instanceId)?.points ?? null;
+    const removeCtl = el("div", "ctl");
+    const removeLab = el("label");
+    removeLab.appendChild(el("span", null, "Points to remove"));
+    removeLab.appendChild(el("span", "val", String(abl.remove)));
+    removeCtl.appendChild(removeLab);
+    const removeIn = el("input");
+    removeIn.type = "range";
+    removeIn.min = "0";
+    removeIn.max = String(Math.max(50, Math.min(objectPoints ?? 2000, 5000)));
+    removeIn.step = "10";
+    removeIn.value = String(abl.remove);
+    removeIn.addEventListener("input", () => {
+      abl.remove = Number(removeIn.value);
+      removeLab.querySelector(".val").textContent = String(abl.remove);
+    });
+    removeCtl.appendChild(removeIn);
+    if (objectPoints) {
+      removeCtl.appendChild(el("div", "lib-meta",
+        `The object has ${fmtInt(objectPoints)} points.`));
+    }
+    block.appendChild(removeCtl);
+
+    const run = el("button", "btn", "Run ablation");
+    run.style.marginTop = "8px";
+    run.disabled = abl.running || state.running || cp.running || state.sal.running || cp.instanceId == null
+      || abl.classA === abl.classB;
+    run.addEventListener("click", () => runAblation());
+    block.appendChild(run);
+    if (abl.classA === abl.classB) {
+      block.appendChild(el("div", "lib-meta", "Pick two different classes."));
+    }
+    if (abl.status) block.appendChild(el("div", "seg-status", abl.status));
+
+    if (abl.result) block.appendChild(renderAblationResult(abl.result));
+    host.appendChild(block);
+  }
+
+  function renderAblationResult(r) {
+    const wrap = el("div", "abl-result");
+    const nameOf = (v) => classChoices(getSceneInfo())?.find((c) => c.value === v)?.name ?? `class ${v}`;
+    const a = nameOf(r.classA), b = nameOf(r.classB);
+    const p = r.preview;
+
+    // One scale across all three frames, so the panels are comparable rather
+    // than three independently stretched ramps -- and a high quantile rather
+    // than the maximum, because attribution is long-tailed: a handful of points
+    // an order of magnitude above the rest would map everything else to the
+    // neutral midpoint and the heatmap would read as empty. Points past the
+    // quantile clamp to the pole.
+    const magnitudes = [];
+    for (const arr of [p.a, p.b, p.diff]) for (const v of arr) magnitudes.push(Math.abs(v));
+    magnitudes.sort((x, y) => x - y);
+    const scale = magnitudes[Math.floor(magnitudes.length * 0.98)] || magnitudes.at(-1) || 1;
+
+    const frames = [
+      { title: a, values: p.a, skip: null },
+      { title: b, values: p.b, skip: null },
+      { title: `${a} − ${b}`, note: `−${fmtInt(r.removedCount)}`, values: p.diff, skip: p.removed },
+    ];
+    const row = el("div", "abl-frames");
+    const canvases = [];
+    for (const f of frames) {
+      const cell = el("div", "abl-frame");
+      const cap = el("div", "abl-frame-title");
+      cap.appendChild(el("span", null, f.title));
+      if (f.note) cap.appendChild(el("span", "abl-frame-note", f.note));
+      cell.appendChild(cap);
+      const canvas = el("canvas");
+      canvas.width = 240; canvas.height = 200;
+      cell.appendChild(canvas);
+      row.appendChild(cell);
+      canvases.push({ canvas, f });
+    }
+    wrap.appendChild(row);
+
+    const redraw = () => {
+      for (const { canvas, f } of canvases) {
+        drawPointView(canvas, {
+          xyz: p.xyz, values: f.values, skip: f.skip,
+          yaw: state.abl.yaw, pitch: state.abl.pitch, scale,
+        });
+      }
+    };
+    for (const { canvas } of canvases) {
+      orbitable(canvas, () => ({ yaw: state.abl.yaw, pitch: state.abl.pitch }), (next) => {
+        state.abl.yaw = next.yaw; state.abl.pitch = next.pitch;
+        redraw();
+      });
+    }
+    requestAnimationFrame(redraw);
+
+    // The ramp is signed, so it needs its poles named -- "more red" means
+    // nothing on its own.
+    const legend = el("div", "abl-legend");
+    legend.appendChild(el("span", "abl-legend-end", "argues against"));
+    const bar = el("div", "abl-legend-bar");
+    bar.style.background = rampCss();
+    legend.appendChild(bar);
+    legend.appendChild(el("span", "abl-legend-end", "argues for"));
+    wrap.appendChild(legend);
+    wrap.appendChild(el("div", "lib-meta",
+      `Drag a frame to orbit all three. The third has its ${fmtInt(r.removedCount)} ` +
+      `highest-difference points taken away. Ramp saturates at ±${scale.toPrecision(2)} ` +
+      `(98th percentile); ${fmtInt(p.count)} of ${fmtInt(r.objectPoints)} points drawn.`));
+
+    // The actual answer: did it change its mind?
+    const table = el("table", "abl-table");
+    const head = el("tr");
+    for (const h of ["", a, b, "majority"]) head.appendChild(el("th", null, h));
+    table.appendChild(head);
+    for (const [label, snap] of [["before", r.before], ["after", r.after]]) {
+      if (!snap) continue;
+      const tr = el("tr");
+      tr.appendChild(el("td", "abl-when", label));
+      for (const v of [r.classA, r.classB]) {
+        tr.appendChild(el("td", null, (snap.per_class?.[v] ?? 0).toFixed(3)));
+      }
+      tr.appendChild(el("td", null, nameOf(snap.label)));
+      table.appendChild(tr);
+    }
+    wrap.appendChild(table);
+
+    if (r.before && r.after) {
+      const flipped = r.before.label !== r.after.label;
+      wrap.appendChild(el("div", flipped ? "abl-verdict flipped" : "abl-verdict",
+        flipped
+          ? `Removing ${fmtInt(r.removedCount)} points turned ${nameOf(r.before.label)} into ${nameOf(r.after.label)}.`
+          : `Still ${nameOf(r.after.label)} after removing ${fmtInt(r.removedCount)} points.`));
+    }
+    return wrap;
+  }
+
+  async function runAblation() {
+    const info = getSceneInfo();
+    const cp = state.cp;
+    const abl = state.abl;
+    if (!info) return;
+    if (!/^https?:\/\//i.test(state.endpoint)) { toast("Set an http(s) endpoint first", true); return; }
+    if (cp.instanceId == null) { toast("Pick an object first", true); return; }
+
+    onHoverEnd?.();
+    abl.running = true;
+    abl.status = "Starting…";
+    render();
+    try {
+      const { jobId } = await fetchJson(`/api/scenes/${encId(info.id)}/ablation`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          endpoint: state.endpoint,
+          instanceId: cp.instanceId,
+          classA: abl.classA,
+          classB: abl.classB,
+          remove: abl.remove,
+          method: abl.method,
+        }),
+      });
+
+      const result = await new Promise((resolve, reject) => {
+        const es = new EventSource(`/api/jobs/${jobId}/events`);
+        es.onmessage = (event) => {
+          const msg = JSON.parse(event.data);
+          abl.status = msg.message ?? "Working…";
+          const box = [...document.querySelectorAll("#segmentation-body .seg-status")].pop();
+          if (box) box.textContent = abl.status;
+          if (msg.state === "done") { es.close(); resolve(msg.scene); }
+          else if (msg.state === "error") { es.close(); reject(new Error(msg.error)); }
+        };
+        es.onerror = () => { es.close(); reject(new Error("lost contact with the ablation job")); };
+      });
+
+      abl.running = false;
+      abl.status = "";
+      abl.result = result;
+      render();
+    } catch (err) {
+      abl.running = false;
+      abl.status = "";
+      toast(`Ablation failed: ${err.message}`, true);
+      render();
+    }
+  }
+
+  /**
+   * Takes analysis fields back off the scene.
+   *
+   * @param names  which attributes, or null for every analysis field
+   */
+  async function dropAttributes(names, count) {
+    const info = getSceneInfo();
+    if (!info) return;
+    const what = names
+      ? "this saliency field"
+      : `all ${count} analysis field${count === 1 ? "" : "s"}`;
+    const ok = await confirmDialog({
+      title: names ? "Remove this field" : "Remove the analysis fields",
+      bodyNode: el("p", "modal-lead",
+        `${names ? "It" : "They"} will be taken off ${info.name} and the octree rebuilt ` +
+        `without ${names ? "it" : "them"}. The analysis itself is not re-run; nothing else ` +
+        "about the scene changes."),
+      note: `Removing ${what}. Running the analysis again puts it back.`,
+      confirmText: "Remove",
+      danger: true,
+    });
+    if (!ok) return;
+
+    state.sal.status = "Removing…";
+    render();
+    try {
+      const { jobId } = await fetchJson(`/api/scenes/${encId(info.id)}/attributes`, {
+        method: "DELETE",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(names ? { names } : {}),
+      });
+      const scene = await new Promise((resolve, reject) => {
+        const es = new EventSource(`/api/jobs/${jobId}/events`);
+        es.onmessage = (event) => {
+          const msg = JSON.parse(event.data);
+          state.sal.status = msg.message ?? "Working…";
+          if (msg.state === "done") { es.close(); resolve(msg.scene); }
+          else if (msg.state === "error") { es.close(); reject(new Error(msg.error)); }
+        };
+        es.onerror = () => { es.close(); reject(new Error("lost contact with the job")); };
+      });
+      state.sal.status = "";
+      const gone = scene.removedAttributes?.length ?? 0;
+      toast(gone ? `Removed ${gone} field${gone === 1 ? "" : "s"}` : "Nothing to remove");
+      if (reloadScene) await reloadScene(scene);
+      render();
+    } catch (err) {
+      state.sal.status = "";
+      toast(`Could not remove: ${err.message}`, true);
+      render();
+    }
   }
 
   async function runSaliency() {
@@ -600,6 +950,7 @@ export function createSegmentation({
           endpoint: state.endpoint,
           instanceId: cp.instanceId,
           classValue: cp.classValue,
+          method: sal.method,
         }),
       });
 
@@ -618,9 +969,10 @@ export function createSegmentation({
 
       sal.running = false;
       sal.status = "";
-      toast(`Saliency computed for object #${cp.instanceId}`);
+      const added = scene.saliency?.attribute ?? "saliency";
+      toast(`${METHODS[sal.method]?.split(" (")[0] ?? sal.method} saliency ready for object #${cp.instanceId}`);
       if (reloadScene) await reloadScene(scene);
-      onSelectAttribute?.("saliency");
+      onSelectAttribute?.(added);
       await loadPreview(true);
     } catch (err) {
       sal.running = false;
@@ -628,6 +980,208 @@ export function createSegmentation({
       toast(`Saliency failed: ${err.message}`, true);
       render();
     }
+  }
+
+  /**
+   * Which model the service has loaded, and the others it offers.
+   *
+   * A model's class names come with it -- the head's width is intrinsic, but
+   * what index 4 *means* is not in the checkpoint -- so switching here changes
+   * the legend, the class pickers and the payload's meaning all at once.
+   */
+  function renderModels(host) {
+    const m = state.models;
+    if (!/^https?:\/\//i.test(state.endpoint)) return;   // nothing to ask
+
+    const ctl = el("div", "ctl");
+    const label = el("label");
+    label.appendChild(el("span", null, "Model"));
+    // The catalogue is fetched once when the tab opens, which is the wrong
+    // moment if the service was not up yet -- and it is re-read by the service
+    // on every request, so re-asking also picks up an edited models.json.
+    const again = el("button", "link-btn", m.switching ? "loading…" : "re-scan");
+    again.title = "Ask the service again for the models it can load";
+    again.disabled = m.switching;
+    again.addEventListener("click", () => {
+      state.models = { ...state.models, error: null, switching: true };
+      render();
+      loadModels();
+    });
+    label.appendChild(again);
+    ctl.appendChild(label);
+
+    if (m.list === null) {
+      ctl.appendChild(el("div", "lib-meta",
+        m.switching ? "Asking the service…" : "Not asked yet — hit re-scan."));
+      host.appendChild(ctl);
+      return;
+    }
+    if (m.error) {
+      ctl.appendChild(el("div", "lib-meta",
+        `Could not reach the service: ${m.error} — start it and hit re-scan.`));
+      host.appendChild(ctl);
+      return;
+    }
+    if (!m.list.length) {
+      ctl.appendChild(el("div", "lib-meta",
+        "This service was started without a model catalogue, so the model cannot be "
+        + "switched from here."));
+      host.appendChild(ctl);
+      return;
+    }
+
+    const sel = el("select");
+    sel.disabled = m.switching || state.running || state.cp.running
+      || state.sal.running || state.abl.running;
+    for (const entry of m.list) {
+      // Only say "untrained" when the name has not already said it.
+      const bare = !entry.weighted && !/untrained|random/i.test(entry.name);
+      const o = el("option", null, entry.name + (bare ? " (untrained)" : ""));
+      o.value = entry.id;
+      o.selected = entry.id === m.active;
+      sel.appendChild(o);
+    }
+    sel.addEventListener("change", () => switchModel(sel.value));
+    ctl.appendChild(sel);
+
+    const chosen = m.list.find((e) => e.id === m.active);
+    ctl.appendChild(el("div", "lib-meta",
+      (chosen?.description ? `${chosen.description} ` : "")
+      + (m.numClasses ? `${m.numClasses} classes; they travel with the model, so switching `
+         + "it switches the legend too." : "")));
+    host.appendChild(ctl);
+  }
+
+  async function loadModels() {
+    if (!/^https?:\/\//i.test(state.endpoint)) return;
+    try {
+      const doc = await fetchJson(
+        `/api/inference/models?endpoint=${encodeURIComponent(state.endpoint)}`);
+      state.models = {
+        list: doc.models ?? [], active: doc.active ?? null,
+        numClasses: doc.num_classes ?? null, classNames: modelClassList(doc),
+        switching: false, error: null,
+      };
+    } catch (err) {
+      state.models = { list: [], active: null, classNames: null, switching: false, error: err.message };
+    }
+    render();
+  }
+
+  async function switchModel(id) {
+    state.models.switching = true;
+    render();
+    try {
+      const doc = await fetchJson("/api/inference/models", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ endpoint: state.endpoint, model: id }),
+      });
+      state.models = {
+        list: state.models.list, active: doc.model ?? id,
+        numClasses: doc.num_classes ?? null, classNames: modelClassList(doc),
+        switching: false, error: null,
+      };
+      for (const entry of state.models.list) entry.active = entry.id === state.models.active;
+      toast(`Now serving ${doc.model} · ${doc.num_classes} classes`);
+      // A different label space means the payload preview and the class pickers
+      // are about something else now.
+      state.cp.classValue = null;
+      state.abl.classA = null;
+      state.abl.classB = null;
+      await loadPreview(true);
+    } catch (err) {
+      state.models.switching = false;
+      toast(`Could not switch model: ${err.message}`, true);
+      render();
+    }
+  }
+
+  /**
+   * How an attribution is formed. The maths lives in the service; this only
+   * names which of its methods to ask for.
+   */
+  const METHODS = {
+    gradient: "gradients (∂score/∂input)",
+    input_x_gradient: "input × gradient",
+    deeplift: "DeepLIFT (vs a noise baseline)",
+    integrated: "integrated gradients (vs a noise baseline)",
+  };
+
+  function methodSelect(current, onChange) {
+    const ctl = el("div", "ctl");
+    const label = el("label");
+    label.appendChild(el("span", null, "Method"));
+    ctl.appendChild(label);
+    const sel = el("select");
+    for (const [key, text] of Object.entries(METHODS)) {
+      const o = el("option", null, text);
+      o.value = key;
+      if (key === current) o.selected = true;
+      sel.appendChild(o);
+    }
+    sel.addEventListener("change", () => { onChange(sel.value); render(); });
+    ctl.appendChild(sel);
+    ctl.appendChild(el("div", "lib-meta",
+      "The baseline is a noise cloud of the same point count, built inside the " +
+      "service from the scene's own statistics — it never crosses the network."));
+    return ctl;
+  }
+
+  /**
+   * The classes a sweep or a saliency map can be about, named.
+   *
+   * After a run, the prediction's own table: it knows exactly which ids came
+   * back. Before one, the scene's semantic field -- the dataset names those ids
+   * in its `classes.json`, and that is the same file the service is handed via
+   * `--class-names`, so the two agree. Either way the user picks a name rather
+   * than guessing a number.
+   */
+  /**
+   * Which class to start on. The ignore class sorts first by value (-1) and is
+   * never what anyone wants to track, so skip it.
+   */
+  const defaultClass = (classes) =>
+    (classes?.find((c) => c.value >= 0) ?? classes?.[0])?.value ?? 0;
+
+  function classChoices(info) {
+    // The loaded model's own label space, first. Everything these pickers feed
+    // -- the sweep's target, the ablation's A and B, the saliency target --
+    // names a column of the model's output, and only the model says what its
+    // columns mean. A scene's own labels describe its ground truth, which is a
+    // different thing and may be a different label space entirely: serve an
+    // S3DIS model while a ScanNet room is open and the scene's names would put
+    // "chair" on the column the model uses for "column".
+    if (state.models.classNames?.length) return state.models.classNames;
+
+    const predicted = info?.prediction?.classes;
+    if (predicted?.length) return predicted;
+    // No service to ask: fall back to the dataset's whole label space, so a
+    // class the room does not contain is still selectable -- "does it become a
+    // lamp when I raise it" is a fair question in a scene with no lamp.
+    return info?.classification?.labelSpace ?? info?.classification?.classes ?? null;
+  }
+
+  /** Where the names in the class pickers came from, so the panel can say. */
+  function classSource(info) {
+    if (state.models.classNames?.length) {
+      return { kind: "model", label: state.models.active ?? "the loaded model" };
+    }
+    if (info?.prediction?.classes?.length) return { kind: "prediction" };
+    if (info?.classification?.labelSpace) {
+      return { kind: "dataset", label: info.classification.source };
+    }
+    return { kind: "scene", label: info?.classification?.source };
+  }
+
+  /** The service's `class_names` map, as the [{value, name}] the pickers want. */
+  function modelClassList(doc) {
+    const names = doc?.class_names;
+    if (!names) return null;
+    const entries = Array.isArray(names)
+      ? names.map((name, value) => ({ value, name }))
+      : Object.entries(names).map(([value, name]) => ({ value: Number(value), name: String(name) }));
+    return entries.filter((c) => Number.isFinite(c.value)).sort((a, b) => a.value - b.value);
   }
 
   async function loadInstances() {
@@ -647,7 +1201,7 @@ export function createSegmentation({
       cp.min = info.tightBoundingBox.min[2];
       cp.max = info.tightBoundingBox.max[2];
     }
-    if (cp.classValue == null) cp.classValue = info.prediction?.classes?.[0]?.value ?? 0;
+    if (cp.classValue == null) cp.classValue = defaultClass(classChoices(info));
   }
 
   async function runCeteris() {
@@ -707,6 +1261,9 @@ export function createSegmentation({
     }
     state.preview = null;
     render();
+    // Ask the service what it can load, the first time the tab is opened against
+    // an endpoint. Cheap, and it fails quietly on a service without a catalogue.
+    if (state.models.list === null && state.models.error === null) loadModels();
     try {
       const p = await fetchJson(`/api/scenes/${encId(info.id)}/segment/preview`);
       p.scene = info.id;

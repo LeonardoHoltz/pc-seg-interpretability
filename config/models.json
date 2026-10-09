@@ -1,0 +1,27 @@
+{
+  "description": "Models the inference service can load, by id. `config` and `weight` are relative to the pointcept checkout; `classNames` to the repo root. A model's class names travel with it: the head's width is intrinsic to the model, but what index 4 *means* is not, so each entry names its own label space.",
+  "default": "litept-scannet20",
+  "models": {
+    "litept-scannet20": {
+      "name": "LitePT-small \u00b7 ScanNet 20",
+      "config": "configs/scannet/semseg-litept-v1m1-0-small.py",
+      "weight": "weights/litept_scannet.pth",
+      "classNames": "config/scannet_subset/classes.json",
+      "description": "Fast indoor semantic segmentation, 20 ScanNet classes."
+    },
+    "ptv3-s3dis13": {
+      "name": "PTv3 \u00b7 S3DIS 13",
+      "config": "configs/s3dis/semseg-pt-v3m1-1-rpe.py",
+      "weight": "weights/ptv3_s3dis.pth",
+      "classNames": "config/s3dis subset/classes.json",
+      "description": "Point Transformer V3 with relative position encoding, S3DIS 13-class space."
+    },
+    "litept-scannet20-random": {
+      "name": "LitePT-small \u00b7 untrained",
+      "config": "configs/scannet/semseg-litept-v1m1-0-small.py",
+      "weight": null,
+      "classNames": "config/scannet_subset/classes.json",
+      "description": "Randomly initialised. For checking the plumbing, not the model."
+    }
+  }
+}

@@ -17,6 +17,11 @@
  *                           report its mean class probability at each
  *   /api/scenes/:id/saliency  ask the service for a per-point scalar about one
  *                           object and add it to the scene as an attribute
+ *   /api/inference/models   GET the service's model catalogue, POST to switch
+ *   DELETE /api/scenes/:id/attributes  drop analysis fields (saliency,
+ *                           prediction) and rebuild the octree without them
+ *   /api/scenes/:id/ablation  two class heatmaps for one object, their
+ *                           difference, and what it becomes without the top of it
  *   /api/library            every extracted instance, across all scenes
  *   /api/jobs/:id/events    server-sent conversion progress
  *   /octree/:id/...         the converted octree, served with Range support
@@ -32,10 +37,30 @@ import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { WEB_DIR, CACHE_DIR, SCENES_DIR, ROOT } from "./paths.mjs";
 import { config, publicConfig } from "./config.mjs";
-import { listScenes, describeScene, resolveScene, cacheDirFor, datasetForId } from "./scene/registry.mjs";
+import { listScenes, describeScene, resolveScene, cacheDirFor, datasetForId, readSidecar } from "./scene/registry.mjs";
 import { previewPayload } from "./inference/predict.mjs";
 import { sceneThumbnail } from "./scene/thumbnail.mjs";
 import { readOctree } from "./octree/read.mjs";
+
+/**
+ * Every class the dataset defines for a scene's semantic field, named and
+ * coloured, in value order -- or null when nothing describes it.
+ */
+function labelSpaceFor(pcdPath, id, converted) {
+  const field = converted.roles?.semantic?.source ?? converted.classification?.source;
+  if (!field) return null;
+  const sidecar = readSidecar(pcdPath, id);
+  const classes = sidecar?.fields?.[field]?.classes;
+  if (!classes) return null;
+  return Object.entries(classes)
+    .map(([value, meta]) => ({
+      value: Number(value),
+      name: meta?.name ?? `class ${value}`,
+      color: meta?.color ?? null,
+    }))
+    .filter((c) => Number.isFinite(c.value))
+    .sort((a, b) => a.value - b.value);
+}
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -466,6 +491,94 @@ function handle(req, res) {
 
       const job = startSaliency(id, {
         endpoint, instanceId, classValue,
+        method: typeof body.method === "string" ? body.method : "input_x_gradient",
+        fields: Array.isArray(body.fields) ? body.fields : null,
+      });
+      sendJson(res, 202, { jobId: job.id });
+    }).catch((err) => sendError(res, 400, err.message));
+  }
+
+  // The inference service's model catalogue, and switching between them.
+  // Proxied rather than called from the browser so the endpoint stays a server
+  // -side concern and the page is not making cross-origin calls of its own.
+  if (path === "/api/inference/models") {
+    const ask = async (body) => {
+      const endpoint = String((body?.endpoint ?? url.searchParams.get("endpoint") ?? "")).trim();
+      if (!/^https?:\/\//i.test(endpoint)) throw new Error("endpoint must be an http(s) URL");
+      const target = new URL("models", endpoint.endsWith("/") ? endpoint : `${endpoint}/`);
+      const res = await fetch(target, body?.model
+        ? {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ model: body.model }),
+            // Loading a checkpoint onto the GPU is slow but bounded.
+            signal: AbortSignal.timeout(5 * 60 * 1000),
+          }
+        : { signal: AbortSignal.timeout(30 * 1000) });
+      const doc = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(doc.error ?? `service returned ${res.status}`);
+      return doc;
+    };
+
+    if (req.method === "GET") {
+      return ask(null).then((doc) => sendJson(res, 200, doc))
+        .catch((err) => sendError(res, 502, err.message));
+    }
+    if (req.method === "POST") {
+      return readJsonBody(req)
+        .then((body) => {
+          if (!body.model) throw new Error("give a model id");
+          return ask(body);
+        })
+        .then((doc) => sendJson(res, 200, doc))
+        .catch((err) => sendError(res, 502, err.message));
+    }
+  }
+
+  // Take analysis fields back off a scene: one, several, or all of them.
+  m = /^\/api\/scenes\/(.+)\/attributes$/.exec(path);
+  if (m && req.method === "DELETE") {
+    const id = decodeURIComponent(m[1]);
+    if (!existsSync(join(cacheDirFor(id), "scene.json"))) {
+      return sendError(res, 404, "this scene has not been converted");
+    }
+    return readJsonBody(req).then((body) => {
+      const names = Array.isArray(body.names) && body.names.length
+        ? body.names.map(String)
+        : null;                       // null means every analysis field
+      const job = startJob(id, "./workers/drop_attributes.mjs", { id, names });
+      sendJson(res, 202, { jobId: job.id });
+    }).catch((err) => sendError(res, 400, err.message));
+  }
+
+  // Two heatmaps for one object, their difference, and the object re-segmented
+  // without the points that argued hardest for the first class.
+  m = /^\/api\/scenes\/(.+)\/ablation$/.exec(path);
+  if (m && req.method === "POST") {
+    const id = decodeURIComponent(m[1]);
+    if (!existsSync(join(cacheDirFor(id), "scene.json"))) {
+      return sendError(res, 404, "convert this scene before analysing it");
+    }
+    return readJsonBody(req).then((body) => {
+      const endpoint = String(body.endpoint ?? "").trim();
+      if (!/^https?:\/\//i.test(endpoint)) {
+        return sendError(res, 400, "endpoint must be an http(s) URL");
+      }
+      const instanceId = Number(body.instanceId);
+      const classA = Number(body.classA);
+      const classB = Number(body.classB);
+      if (!Number.isFinite(instanceId)) return sendError(res, 400, "instanceId is required");
+      if (!Number.isFinite(classA) || !Number.isFinite(classB)) {
+        return sendError(res, 400, "classA and classB are required");
+      }
+      if (classA === classB) return sendError(res, 400, "the two classes must differ");
+
+      const job = startJob(id, "./workers/ablation.mjs", {
+        id, endpoint, instanceId, classA, classB,
+        remove: Math.max(0, Number(body.remove) || 0),
+        method: typeof body.method === "string" ? body.method : "deeplift",
+        baseline: typeof body.baseline === "string" ? body.baseline : "noise",
+        steps: Math.max(2, Number(body.steps) || 16),
         fields: Array.isArray(body.fields) ? body.fields : null,
       });
       sendJson(res, 202, { jobId: job.id });
@@ -599,6 +712,14 @@ function handle(req, res) {
     const sceneJson = join(cacheDirFor(id), "scene.json");
     if (existsSync(sceneJson)) {
       try { scene.converted = JSON.parse(readFileSync(sceneJson, "utf8")); } catch { /* ignore */ }
+    }
+    if (scene.converted?.classification) {
+      // The dataset's *whole* label space, not just the classes this room
+      // happens to contain. A model predicts into the full space, so asking
+      // "what is P(lamp) for this object" has to be possible in a scene that has
+      // no lamp in its ground truth. Read from the sidecar rather than the
+      // cache, so it follows an edited classes.json without a reconversion.
+      scene.converted.classification.labelSpace = labelSpaceFor(pcdPath, id, scene.converted);
     }
     return sendJson(res, 200, scene);
   }
