@@ -27,8 +27,15 @@ elif docker image inspect pcit-pointcept:latest >/dev/null 2>&1; then
 else
   IMAGE="pointcept/pointcept:v1.6.0"
 fi
-CONFIG="configs/scannet/semseg-litept-v1m1-0-small.py"
-CLASS_NAMES="config/scannet_subset/classes.json"
+MODELS="config/models.json"       # the catalogue; "" to disable GET/POST /models
+MODEL=""                          # which of them to start on (default: the file's own)
+# Empty by default so a catalogue entry can supply them. Passing either on the
+# command line overrides whatever the entry says; with no catalogue, the
+# fallbacks below are what gets served.
+CONFIG=""
+CLASS_NAMES=""
+FALLBACK_CONFIG="configs/scannet/semseg-litept-v1m1-0-small.py"
+FALLBACK_CLASS_NAMES="config/scannet_subset/classes.json"
 WEIGHT=""
 PORT=8500
 DEVICE=""
@@ -41,6 +48,11 @@ usage() {
   cat <<'USAGE'
 
 Options:
+  --models PATH        model catalogue, relative to the repo root (default: config/models.json);
+                       serves GET /models and POST /models so the model can be switched
+                       without restarting. Pass "" to turn that off
+  --model ID           which catalogue entry to start on; supplies its own config,
+                       weight and class names, so --config/--weight become overrides
   --config PATH        Pointcept config, relative to pointcept/ (default: LitePT-v1 small)
   --weight NAME        checkpoint in pointcept/weights/ (a bare filename is enough);
                        omit for a randomly initialised model
@@ -66,6 +78,8 @@ USAGE
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --models)       MODELS="$2"; shift 2 ;;
+    --model)        MODEL="$2"; shift 2 ;;
     --config)       CONFIG="$2"; shift 2 ;;
     --weight)       WEIGHT="$2"; shift 2 ;;
     --class-names)  CLASS_NAMES="$2"; shift 2 ;;
@@ -149,7 +163,22 @@ if [[ -n "$WEIGHT" ]]; then
 fi
 
 # ---- the command inside the container ---------------------------------------
-serve=(python tools/serve_inference.py --config-file "$CONFIG" --host 0.0.0.0 --port "$PORT")
+serve=(python tools/serve_inference.py --host 0.0.0.0 --port "$PORT")
+
+# A catalogue entry brings its own config, weight and class names, and serving
+# it is what makes GET/POST /models meaningful -- so with a catalogue present,
+# nothing is passed unless it was asked for explicitly.
+have_catalogue=0
+if [[ -n "$MODELS" && -f "$REPO/$MODELS" ]]; then
+  have_catalogue=1
+  serve+=(--models "$MOUNT/$MODELS")
+  [[ -n "$MODEL" ]] && serve+=(--model "$MODEL")
+fi
+if [[ "$have_catalogue" -eq 0 ]]; then
+  CONFIG="${CONFIG:-$FALLBACK_CONFIG}"
+  CLASS_NAMES="${CLASS_NAMES:-$FALLBACK_CLASS_NAMES}"
+fi
+[[ -n "$CONFIG"      ]] && serve+=(--config-file "$CONFIG")
 [[ -n "$WEIGHT"      ]] && serve+=(--weight "$weight_in_container")
 [[ -n "$DEVICE"      ]] && serve+=(--device "$DEVICE")
 [[ -n "$CLASS_NAMES" && -f "$REPO/$CLASS_NAMES" ]] && serve+=(--class-names "$MOUNT/$CLASS_NAMES")
@@ -165,7 +194,7 @@ tty_args=()
 
 echo "image     $IMAGE"
 echo "gpu       $gpu_mode"
-echo "config    $CONFIG"
+echo "config    ${CONFIG:-(from the catalogue)}"
 echo "weight    ${WEIGHT:-(none -- randomly initialised)}"
 echo "endpoint  http://127.0.0.1:$PORT/"
 echo

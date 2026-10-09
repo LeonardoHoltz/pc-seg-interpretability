@@ -17,6 +17,9 @@
  *                           report its mean class probability at each
  *   /api/scenes/:id/saliency  ask the service for a per-point scalar about one
  *                           object and add it to the scene as an attribute
+ *   /api/inference/models   GET the service's model catalogue, POST to switch
+ *   DELETE /api/scenes/:id/attributes  drop analysis fields (saliency,
+ *                           prediction) and rebuild the octree without them
  *   /api/scenes/:id/ablation  two class heatmaps for one object, their
  *                           difference, and what it becomes without the top of it
  *   /api/library            every extracted instance, across all scenes
@@ -491,6 +494,59 @@ function handle(req, res) {
         method: typeof body.method === "string" ? body.method : "input_x_gradient",
         fields: Array.isArray(body.fields) ? body.fields : null,
       });
+      sendJson(res, 202, { jobId: job.id });
+    }).catch((err) => sendError(res, 400, err.message));
+  }
+
+  // The inference service's model catalogue, and switching between them.
+  // Proxied rather than called from the browser so the endpoint stays a server
+  // -side concern and the page is not making cross-origin calls of its own.
+  if (path === "/api/inference/models") {
+    const ask = async (body) => {
+      const endpoint = String((body?.endpoint ?? url.searchParams.get("endpoint") ?? "")).trim();
+      if (!/^https?:\/\//i.test(endpoint)) throw new Error("endpoint must be an http(s) URL");
+      const target = new URL("models", endpoint.endsWith("/") ? endpoint : `${endpoint}/`);
+      const res = await fetch(target, body?.model
+        ? {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ model: body.model }),
+            // Loading a checkpoint onto the GPU is slow but bounded.
+            signal: AbortSignal.timeout(5 * 60 * 1000),
+          }
+        : { signal: AbortSignal.timeout(30 * 1000) });
+      const doc = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(doc.error ?? `service returned ${res.status}`);
+      return doc;
+    };
+
+    if (req.method === "GET") {
+      return ask(null).then((doc) => sendJson(res, 200, doc))
+        .catch((err) => sendError(res, 502, err.message));
+    }
+    if (req.method === "POST") {
+      return readJsonBody(req)
+        .then((body) => {
+          if (!body.model) throw new Error("give a model id");
+          return ask(body);
+        })
+        .then((doc) => sendJson(res, 200, doc))
+        .catch((err) => sendError(res, 502, err.message));
+    }
+  }
+
+  // Take analysis fields back off a scene: one, several, or all of them.
+  m = /^\/api\/scenes\/(.+)\/attributes$/.exec(path);
+  if (m && req.method === "DELETE") {
+    const id = decodeURIComponent(m[1]);
+    if (!existsSync(join(cacheDirFor(id), "scene.json"))) {
+      return sendError(res, 404, "this scene has not been converted");
+    }
+    return readJsonBody(req).then((body) => {
+      const names = Array.isArray(body.names) && body.names.length
+        ? body.names.map(String)
+        : null;                       // null means every analysis field
+      const job = startJob(id, "./workers/drop_attributes.mjs", { id, names });
       sendJson(res, 202, { jobId: job.id });
     }).catch((err) => sendError(res, 400, err.message));
   }

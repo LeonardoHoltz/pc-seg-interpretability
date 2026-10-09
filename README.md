@@ -655,14 +655,21 @@ docker/build_pointcept_image.sh            # -> pcit-pointcept:latest
 tools/serve_pointcept.sh --weight model_best.pth
 ```
 
-`tools/serve_pointcept.sh` on its own serves a randomly initialised LitePT-small, which is
-useful for checking the plumbing and nothing else. Its options:
+`tools/serve_pointcept.sh` on its own serves the catalogue's default entry, weights and
+all. **Without a catalogue** (`--models ""`) and without `--weight`, the config's
+architecture is built and left **randomly initialised** — it answers with the right number
+of logits and they mean nothing, which is useful for checking the plumbing and nothing
+else. The service says so at startup:
+
+    WARNING => No weight given; the model is randomly initialised.
+
+Its options:
 
 | flag | |
 | --- | --- |
 | `--weight NAME` | checkpoint in `pointcept/weights/`; a bare filename is enough |
 | `--config PATH` | Pointcept config, relative to `pointcept/` (default: LitePT-v1 small) |
-| `--class-names PATH` | class-name JSON (default: `config/scannet_subset/classes.json`) |
+| `--class-names PATH` | class-name JSON; overrides the catalogue entry's |
 | `--port N` | host port (default: 8500) |
 | `--device D` | `cuda`, `cuda:N` or `cpu` |
 | `--image REF` | docker image (default: the locally built one, else the published one) |
@@ -840,12 +847,72 @@ Pick the object, class A ("what it is now"), class B ("what it might become"), a
 how many points to take away. The result is three small clouds — attribution for A, for B,
 and A − B with the removed points *absent* — over a shared diverging ramp, blue for "argues
 against" and red for "argues for", with a grey midpoint so "no opinion" recedes. Drag any
-frame to orbit all three. Underneath, the object's mean probability for both classes before
+frame to orbit all three. They use the same camera as the library thumbnails, so an object
+faces the same way in both — a panel apart, two views that disagreed about handedness would
+be a trap. Underneath, the object's mean probability for both classes before
 and after, and the majority label each time: the claim "A turned into B" is a number, not an
 impression.
 
 Nothing is written to the scene. The attributions and the removal live in the panel until
 the next run.
+
+#### Switching the model without restarting
+
+The service can carry a **catalogue** of models it is allowed to load,
+[`config/models.json`](config/models.json), and expose two endpoints for it:
+
+```bash
+curl -s http://127.0.0.1:8500/models
+{"active": "litept-scannet20", "num_classes": 20, "models": [ … ]}
+
+curl -s -X POST -d '{"model":"ptv3-s3dis13"}' http://127.0.0.1:8500/models
+{"model": "ptv3-s3dis13", "num_classes": 13, "class_names": {"0": "ceiling", …}}
+```
+
+The viewer proxies both as `GET`/`POST /api/inference/models`, and the Segmentation tab
+shows a **Model** dropdown under the endpoint, with a **re-scan** beside it: the catalogue
+is fetched when the tab first opens, which is the wrong moment if the service was not up
+yet, and re-asking also picks up an edited `models.json` without a restart on either side. Each entry names its config, checkpoint and
+class names:
+
+```jsonc
+"ptv3-s3dis13": {
+  "name": "PTv3 · S3DIS 13",
+  "config": "configs/s3dis/semseg-pt-v3m1-1-rpe.py",   // relative to pointcept/
+  "weight": "weights/ptv3_s3dis.pth",                  // relative to pointcept/
+  "classNames": "config/s3dis subset/classes.json"     // relative to the repo root
+}
+```
+
+**Selecting a model selects its label space, everywhere.** The class pickers — the sweep's
+target, the ablation's A and B — name a *column of the model's output*, so they are filled
+from the loaded model's own names and relabel themselves when you switch. The scene's own
+legend does not change: that describes the ground truth, which is a different thing and may
+be a different label space entirely. Serve an S3DIS model while a ScanNet room is open and
+the pickers read `ceiling, floor, wall, beam…` while the scene still shows
+`wall, floor, cabinet…` — which is correct, and the panel says which it is showing.
+
+**Class names are part of the model entry, and that is not redundant.** The *width* of the
+head is intrinsic — a 20-class model answers with 20 logits whatever anyone configures, and
+the viewer reads the count from the reply. What index 4 *means* is **not** in the
+checkpoint: nothing in those weights says "chair". Two label spaces of the same width
+disagree about it, and `fallback_class_names` can only guess from the config's dataset
+class. So the names travel with the model, and switching model switches the legend with it
+rather than leaving the old words over new numbers.
+
+The catalogue is **re-read on every request**, so adding a checkpoint or fixing a wrong
+config costs no restart. A failed load leaves the previous model serving — the new engine is
+built before the old one is let go, and the error comes back to the caller:
+
+```
+POST /models {"model": "ptv3-s3dis13"}
+-> 400 RuntimeError: Unexpected key(s) in state_dict: "...attn.rpe.rpe_table"   (0.4s)
+   model: litept-scannet20     <- still loaded, still answering
+```
+
+That is a real example: the first version of the catalogue pointed that checkpoint at
+`-0-base.py` when it wants `-1-rpe.py`. GPU memory is returned on a successful switch —
+measured 11.8 GiB → 1.6 GiB going from PTv3 back to LitePT.
 
 #### Methods
 
@@ -939,15 +1006,48 @@ method needs a target. Reply with
                  float32  (M,)   or just the masked points, in ascending index
                                  order; the rest of the scene reads as 0
 
+#### Positive and negative
+
+The field is **signed**: positive means the point pushed the model toward the class,
+negative means it pushed away, zero means it did not matter. An absolute value would call
+the last two the same thing, which is exactly the distinction an attribution exists to make.
+
+Signed fields open on a **diverging ramp** — blue for *argues against*, grey for *no
+opinion*, red for *argues for* — with the range **symmetric about zero**, because Potree
+maps `[lo, hi]` linearly onto the ramp and an asymmetric range would put the neutral colour
+somewhere other than zero. A **Centre on 0** button restores that after dragging. The two
+poles are a validated pair (ΔE 19.2 protan, 29.0 normal against this surface), and the ramp
+is generated by the same function the ablation frames use, so a map reads identically in
+both places. Any field that spans zero gets this treatment, `normal_x` included.
+
+It also opens on a **robust** range rather than the full one. Attribution is long-tailed:
+on a real run the extremes were ±1.0 while the 98th percentile of magnitude was ±0.031, so
+scaling to the extremes showed one grey cloud. The analysis records where the ramp should
+open; the full span is still a drag away.
+
+**Every scalar keeps its own ramp and its own range.** Setting `normal_x` to viridis leaves
+a saliency field on diverging; the mapping is remembered per attribute for as long as the
+scene stays open.
+
 **What the scalar measures and how it is aggregated is entirely the service's business.**
 The viewer makes no assumptions: it carries the numbers back, records their range, and
 hands them to the colour pipeline. Both reply shapes are accepted, so a method that only
 scores the object costs no more than one that scores the whole cloud.
 
 `prediction`, `prediction_score` and every saliency field coexist happily — they are
-separate attributes and any of them can be the active colour mode. Each one costs 8 bytes
-per point in the octree, so a scene with a dozen of them is noticeably bigger; re-converting
-the scene clears them all.
+separate attributes and any of them can be the active colour mode.
+
+**Taking them off again.** Each field costs 8 bytes per point in the octree, so they are
+worth clearing when you are done: **✕** on a row removes that one, **clear all** in the
+block's header removes every analysis field the scene carries. Both rebuild the octree
+without those columns — the same rewrite that adds them, run the other way — and prune the
+records that described them, so nothing is left pointing at a field that no longer exists.
+Removing the field the "latest" pointer referred to moves it to whatever survived.
+
+Which fields count as removable comes from the scene's own records (`saliencyRuns`,
+`prediction`), not from a name pattern: a scene knows what it was given because it wrote it
+down, and a source field that happens to be called `prediction` is not the viewer's to
+delete. Re-converting the scene also clears the lot.
 
 ---
 

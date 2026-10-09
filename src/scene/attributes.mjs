@@ -38,6 +38,72 @@ export function minMax(arr) {
  * @param add    [{ name, label, kind, values (per point), classes?, sceneExtra? }]
  * @param remove attribute names to drop before adding
  */
+/**
+ * The attributes an analysis put on a scene, as opposed to the ones conversion
+ * derived from the source cloud.
+ *
+ * Taken from the scene's own records rather than from a name pattern: a scene
+ * knows which fields it was given because it wrote them down, and a user field
+ * that happens to be called `prediction` is not ours to delete.
+ */
+export function analysisAttributes(scene) {
+  const out = [];
+  for (const run of scene.saliencyRuns ?? []) {
+    if (run.attribute) out.push({ name: run.attribute, label: run.label ?? run.attribute, kind: "saliency" });
+  }
+  if (scene.saliency?.attribute && !out.some((a) => a.name === scene.saliency.attribute)) {
+    out.push({ name: scene.saliency.attribute, label: scene.saliency.label ?? scene.saliency.attribute, kind: "saliency" });
+  }
+  if (scene.prediction) {
+    for (const name of ["prediction", "prediction_score"]) {
+      if ((scene.attributes ?? []).some((a) => a.name === name)) {
+        out.push({ name, label: (scene.attributes ?? []).find((a) => a.name === name)?.label ?? name, kind: "prediction" });
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Takes analysis attributes back off a scene.
+ *
+ * The octree is rebuilt without those columns -- the same rewrite that adds
+ * them, run the other way -- and the bookkeeping that described them goes too,
+ * so nothing is left pointing at a field that no longer exists.
+ *
+ * @param names  which to drop; every analysis attribute when omitted
+ */
+export function dropAnalysisAttributes(sceneId, { cacheDir, names = null, onProgress = () => {} }) {
+  const sceneJsonPath = join(cacheDir, "scene.json");
+  if (!existsSync(sceneJsonPath)) throw new Error(`${sceneId} has not been converted yet`);
+  const scene = JSON.parse(readFileSync(sceneJsonPath, "utf8"));
+
+  const removable = analysisAttributes(scene);
+  const wanted = names ? new Set(names) : null;
+  const remove = removable.filter((a) => !wanted || wanted.has(a.name)).map((a) => a.name);
+  if (remove.length === 0) {
+    return { scene, removed: [], skipped: true };
+  }
+
+  onProgress({ phase: "building", progress: 0.1, message: `Removing ${remove.length} field(s)` });
+  const { scene: rebuilt } = rewriteSceneWithAttributes(sceneId, { cacheDir, remove, onProgress });
+
+  const gone = new Set(remove);
+  const updated = { ...rebuilt };
+  updated.saliencyRuns = (rebuilt.saliencyRuns ?? []).filter((r) => !gone.has(r.attribute));
+  if (updated.saliencyRuns.length === 0) delete updated.saliencyRuns;
+  if (rebuilt.saliency?.attribute && gone.has(rebuilt.saliency.attribute)) {
+    // Keep pointing at whatever survived, so "the latest" stays true.
+    if (updated.saliencyRuns?.length) updated.saliency = updated.saliencyRuns[0];
+    else delete updated.saliency;
+  }
+  if (gone.has("prediction")) delete updated.prediction;
+
+  writeFileSync(sceneJsonPath, JSON.stringify(updated, null, 2));
+  onProgress({ phase: "done", progress: 1, message: "Done" });
+  return { scene: updated, removed: remove, skipped: false };
+}
+
 export function rewriteSceneWithAttributes(sceneId, { cacheDir, add = [], remove = [], onProgress = () => {} }) {
   const sceneJsonPath = join(cacheDir, "scene.json");
   if (!existsSync(sceneJsonPath)) throw new Error(`${sceneId} has not been converted yet`);
@@ -115,6 +181,9 @@ export function rewriteSceneWithAttributes(sceneId, { cacheDir, add = [], remove
       potreeMode: "extra",
       min: entry.range[0],
       max: entry.range[1],
+      // Where a viewer should *open* the ramp, when that differs from the full
+      // span -- a long-tailed field is unreadable stretched to its extremes.
+      ...(entry.displayRange ? { displayRange: entry.displayRange } : {}),
       ...(entry.classes ? { classes: entry.classes, numClasses: entry.classes.length } : {}),
     })),
   ];

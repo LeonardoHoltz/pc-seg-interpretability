@@ -68,15 +68,23 @@ export function drawPointView(canvas, { xyz, values, skip = null, yaw = 0.6, pit
   const cosP = Math.cos(pitch), sinP = Math.sin(pitch);
 
   // Project every point once, then fit the result to the canvas.
+  //
+  // This is the same camera as the library thumbnails (src/scene/thumbnail.mjs),
+  // deliberately: the two views sit a panel apart and must not disagree about
+  // which way an object faces. The earlier version here used `x·cos − y·sin`
+  // for the horizontal, which swaps the roles of +x and +y and renders the
+  // object mirrored -- a right-handed world seen from above the horizon has to
+  // put x→y counter-clockwise on screen, and that version put it clockwise.
   const u = new Float32Array(n), v = new Float32Array(n), d = new Float32Array(n);
   let minU = Infinity, maxU = -Infinity, minV = Infinity, maxV = -Infinity;
   for (let i = 0; i < n; i++) {
     const x = xyz[i * 3] - cx, y = xyz[i * 3 + 1] - cy, z = xyz[i * 3 + 2] - cz;
-    const rx = x * cosY - y * sinY;
-    const ry = x * sinY + y * cosY;
-    u[i] = rx;
-    v[i] = z * cosP - ry * sinP;          // z up
-    d[i] = z * sinP + ry * cosP;          // depth along the view
+    // In-plane distance along the view azimuth; it carries the depth and the
+    // foreshortening, and never the horizontal.
+    const h = x * cosY + y * sinY;
+    u[i] = -x * sinY + y * cosY;
+    v[i] = z * cosP - h * sinP;           // z up
+    d[i] = h * cosP + z * sinP;           // larger is farther
     if (u[i] < minU) minU = u[i]; if (u[i] > maxU) maxU = u[i];
     if (v[i] < minV) minV = v[i]; if (v[i] > maxV) maxV = v[i];
   }

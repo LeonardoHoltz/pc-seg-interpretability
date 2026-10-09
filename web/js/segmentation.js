@@ -34,6 +34,8 @@ export function createSegmentation({
       running: false, status: "", result: null, view: "chart",
     },
     // Saliency: one scalar per point, aggregated however the service sees fit.
+    // The service's own catalogue of loadable models.
+    models: { list: null, active: null, classNames: null, switching: false, error: null },
     sal: { running: false, status: "", method: "input_x_gradient" },
     // The ablation experiment: two class heatmaps, their difference, and the
     // object re-segmented without the points at the top of it.
@@ -92,11 +94,15 @@ export function createSegmentation({
     ep.addEventListener("change", () => {
       state.endpoint = ep.value.trim();
       try { localStorage.setItem(ENDPOINT_KEY, state.endpoint); } catch { /* ignore */ }
+      state.models = { list: null, active: null, classNames: null, switching: false, error: null };
+      loadModels();
     });
     epCtl.appendChild(ep);
     host.appendChild(epCtl);
     host.appendChild(el("div", "lib-meta",
       "The server posts the points there and waits for the labels."));
+
+    renderModels(host);
 
     // --- what will be sent ---
     const head = el("div", "seg-head");
@@ -448,7 +454,7 @@ export function createSegmentation({
 
     // --- class ---
     const classes = classChoices(info);
-    const fromScene = !info?.prediction?.classes?.length;
+
     const clsCtl = el("div", "ctl");
     const clsLabel = el("label");
     clsLabel.appendChild(el("span", null, "Class to track"));
@@ -467,16 +473,15 @@ export function createSegmentation({
       // Before a run the names come from the scene's own labels. Usually that is
       // the same label space the service was handed via --class-names, but it is
       // the dataset's word for the id, not the model's, so say which it is.
-      if (fromScene) {
-        const whole = Boolean(info.classification?.labelSpace);
-        clsCtl.appendChild(el("div", "lib-meta",
-          whole
-            ? `All ${classes.length} classes of ${info.classification.source}, including ones ` +
-              "this scene does not contain. After a run the list comes from the prediction."
-            : `Names from this scene's ${info.classification?.source ?? "class"} field. ` +
-              "After a run they come from the prediction itself."));
-      }
-    } else {
+      const src = classSource(info);
+      clsCtl.appendChild(el("div", "lib-meta",
+        src.kind === "model"
+          ? `The ${classes.length} classes of the loaded model (${src.label}). `
+            + "Switching model switches this list."
+          : src.kind === "prediction"
+            ? `The ${classes.length} classes the last prediction returned.`
+            : `No service reachable, so these are this scene's own ${src.label ?? "class"} `
+              + "labels — the model may use a different label space."));    } else {
       const num = el("input");
       num.type = "number"; num.step = "1"; num.min = "0";
       num.value = String(cp.classValue ?? 0);
@@ -594,8 +599,17 @@ export function createSegmentation({
     const runs = info?.saliencyRuns ?? (info?.saliency ? [info.saliency] : []);
     if (runs.length) {
       const list = el("div", "sal-runs");
-      list.appendChild(el("div", "sal-runs-head",
+      const head = el("div", "sal-runs-head");
+      head.appendChild(el("span", null,
         runs.length === 1 ? "1 saliency field" : `${runs.length} saliency fields`));
+      // They accumulate on purpose, so there has to be a way to take them off
+      // again -- each one is 8 bytes a point in the octree.
+      const clearAll = el("button", "link-btn", "clear all");
+      clearAll.title = "Remove every analysis field from this scene";
+      clearAll.disabled = sal.running || cp.running || state.running || state.abl.running;
+      clearAll.addEventListener("click", () => dropAttributes(null, runs.length));
+      head.appendChild(clearAll);
+      list.appendChild(head);
       for (const r of runs) {
         const row = el("div", "sal-run");
         const txt = el("div", "lib-txt");
@@ -610,6 +624,12 @@ export function createSegmentation({
         show.title = r.label ?? r.attribute;
         show.addEventListener("click", () => onSelectAttribute?.(r.attribute ?? "saliency"));
         row.appendChild(show);
+
+        const drop = el("button", "eye", "✕");
+        drop.title = `Remove ${r.label ?? r.attribute} from the scene`;
+        drop.disabled = sal.running || cp.running || state.running || state.abl.running;
+        drop.addEventListener("click", () => dropAttributes([r.attribute], 1));
+        row.appendChild(drop);
         list.appendChild(row);
       }
       block.appendChild(list);
@@ -857,6 +877,59 @@ export function createSegmentation({
     }
   }
 
+  /**
+   * Takes analysis fields back off the scene.
+   *
+   * @param names  which attributes, or null for every analysis field
+   */
+  async function dropAttributes(names, count) {
+    const info = getSceneInfo();
+    if (!info) return;
+    const what = names
+      ? "this saliency field"
+      : `all ${count} analysis field${count === 1 ? "" : "s"}`;
+    const ok = await confirmDialog({
+      title: names ? "Remove this field" : "Remove the analysis fields",
+      bodyNode: el("p", "modal-lead",
+        `${names ? "It" : "They"} will be taken off ${info.name} and the octree rebuilt ` +
+        `without ${names ? "it" : "them"}. The analysis itself is not re-run; nothing else ` +
+        "about the scene changes."),
+      note: `Removing ${what}. Running the analysis again puts it back.`,
+      confirmText: "Remove",
+      danger: true,
+    });
+    if (!ok) return;
+
+    state.sal.status = "Removing…";
+    render();
+    try {
+      const { jobId } = await fetchJson(`/api/scenes/${encId(info.id)}/attributes`, {
+        method: "DELETE",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(names ? { names } : {}),
+      });
+      const scene = await new Promise((resolve, reject) => {
+        const es = new EventSource(`/api/jobs/${jobId}/events`);
+        es.onmessage = (event) => {
+          const msg = JSON.parse(event.data);
+          state.sal.status = msg.message ?? "Working…";
+          if (msg.state === "done") { es.close(); resolve(msg.scene); }
+          else if (msg.state === "error") { es.close(); reject(new Error(msg.error)); }
+        };
+        es.onerror = () => { es.close(); reject(new Error("lost contact with the job")); };
+      });
+      state.sal.status = "";
+      const gone = scene.removedAttributes?.length ?? 0;
+      toast(gone ? `Removed ${gone} field${gone === 1 ? "" : "s"}` : "Nothing to remove");
+      if (reloadScene) await reloadScene(scene);
+      render();
+    } catch (err) {
+      state.sal.status = "";
+      toast(`Could not remove: ${err.message}`, true);
+      render();
+    }
+  }
+
   async function runSaliency() {
     const info = getSceneInfo();
     const cp = state.cp;
@@ -910,6 +983,121 @@ export function createSegmentation({
   }
 
   /**
+   * Which model the service has loaded, and the others it offers.
+   *
+   * A model's class names come with it -- the head's width is intrinsic, but
+   * what index 4 *means* is not in the checkpoint -- so switching here changes
+   * the legend, the class pickers and the payload's meaning all at once.
+   */
+  function renderModels(host) {
+    const m = state.models;
+    if (!/^https?:\/\//i.test(state.endpoint)) return;   // nothing to ask
+
+    const ctl = el("div", "ctl");
+    const label = el("label");
+    label.appendChild(el("span", null, "Model"));
+    // The catalogue is fetched once when the tab opens, which is the wrong
+    // moment if the service was not up yet -- and it is re-read by the service
+    // on every request, so re-asking also picks up an edited models.json.
+    const again = el("button", "link-btn", m.switching ? "loading…" : "re-scan");
+    again.title = "Ask the service again for the models it can load";
+    again.disabled = m.switching;
+    again.addEventListener("click", () => {
+      state.models = { ...state.models, error: null, switching: true };
+      render();
+      loadModels();
+    });
+    label.appendChild(again);
+    ctl.appendChild(label);
+
+    if (m.list === null) {
+      ctl.appendChild(el("div", "lib-meta",
+        m.switching ? "Asking the service…" : "Not asked yet — hit re-scan."));
+      host.appendChild(ctl);
+      return;
+    }
+    if (m.error) {
+      ctl.appendChild(el("div", "lib-meta",
+        `Could not reach the service: ${m.error} — start it and hit re-scan.`));
+      host.appendChild(ctl);
+      return;
+    }
+    if (!m.list.length) {
+      ctl.appendChild(el("div", "lib-meta",
+        "This service was started without a model catalogue, so the model cannot be "
+        + "switched from here."));
+      host.appendChild(ctl);
+      return;
+    }
+
+    const sel = el("select");
+    sel.disabled = m.switching || state.running || state.cp.running
+      || state.sal.running || state.abl.running;
+    for (const entry of m.list) {
+      // Only say "untrained" when the name has not already said it.
+      const bare = !entry.weighted && !/untrained|random/i.test(entry.name);
+      const o = el("option", null, entry.name + (bare ? " (untrained)" : ""));
+      o.value = entry.id;
+      o.selected = entry.id === m.active;
+      sel.appendChild(o);
+    }
+    sel.addEventListener("change", () => switchModel(sel.value));
+    ctl.appendChild(sel);
+
+    const chosen = m.list.find((e) => e.id === m.active);
+    ctl.appendChild(el("div", "lib-meta",
+      (chosen?.description ? `${chosen.description} ` : "")
+      + (m.numClasses ? `${m.numClasses} classes; they travel with the model, so switching `
+         + "it switches the legend too." : "")));
+    host.appendChild(ctl);
+  }
+
+  async function loadModels() {
+    if (!/^https?:\/\//i.test(state.endpoint)) return;
+    try {
+      const doc = await fetchJson(
+        `/api/inference/models?endpoint=${encodeURIComponent(state.endpoint)}`);
+      state.models = {
+        list: doc.models ?? [], active: doc.active ?? null,
+        numClasses: doc.num_classes ?? null, classNames: modelClassList(doc),
+        switching: false, error: null,
+      };
+    } catch (err) {
+      state.models = { list: [], active: null, classNames: null, switching: false, error: err.message };
+    }
+    render();
+  }
+
+  async function switchModel(id) {
+    state.models.switching = true;
+    render();
+    try {
+      const doc = await fetchJson("/api/inference/models", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ endpoint: state.endpoint, model: id }),
+      });
+      state.models = {
+        list: state.models.list, active: doc.model ?? id,
+        numClasses: doc.num_classes ?? null, classNames: modelClassList(doc),
+        switching: false, error: null,
+      };
+      for (const entry of state.models.list) entry.active = entry.id === state.models.active;
+      toast(`Now serving ${doc.model} · ${doc.num_classes} classes`);
+      // A different label space means the payload preview and the class pickers
+      // are about something else now.
+      state.cp.classValue = null;
+      state.abl.classA = null;
+      state.abl.classB = null;
+      await loadPreview(true);
+    } catch (err) {
+      state.models.switching = false;
+      toast(`Could not switch model: ${err.message}`, true);
+      render();
+    }
+  }
+
+  /**
    * How an attribution is formed. The maths lives in the service; this only
    * names which of its methods to ask for.
    */
@@ -957,13 +1145,43 @@ export function createSegmentation({
     (classes?.find((c) => c.value >= 0) ?? classes?.[0])?.value ?? 0;
 
   function classChoices(info) {
+    // The loaded model's own label space, first. Everything these pickers feed
+    // -- the sweep's target, the ablation's A and B, the saliency target --
+    // names a column of the model's output, and only the model says what its
+    // columns mean. A scene's own labels describe its ground truth, which is a
+    // different thing and may be a different label space entirely: serve an
+    // S3DIS model while a ScanNet room is open and the scene's names would put
+    // "chair" on the column the model uses for "column".
+    if (state.models.classNames?.length) return state.models.classNames;
+
     const predicted = info?.prediction?.classes;
     if (predicted?.length) return predicted;
-    // The dataset's whole label space, so a class the room does not contain is
-    // still selectable -- "does it become a lamp when I raise it" is a fair
-    // question in a scene with no lamp. Falls back to what the scene does
-    // contain when nothing describes the field.
+    // No service to ask: fall back to the dataset's whole label space, so a
+    // class the room does not contain is still selectable -- "does it become a
+    // lamp when I raise it" is a fair question in a scene with no lamp.
     return info?.classification?.labelSpace ?? info?.classification?.classes ?? null;
+  }
+
+  /** Where the names in the class pickers came from, so the panel can say. */
+  function classSource(info) {
+    if (state.models.classNames?.length) {
+      return { kind: "model", label: state.models.active ?? "the loaded model" };
+    }
+    if (info?.prediction?.classes?.length) return { kind: "prediction" };
+    if (info?.classification?.labelSpace) {
+      return { kind: "dataset", label: info.classification.source };
+    }
+    return { kind: "scene", label: info?.classification?.source };
+  }
+
+  /** The service's `class_names` map, as the [{value, name}] the pickers want. */
+  function modelClassList(doc) {
+    const names = doc?.class_names;
+    if (!names) return null;
+    const entries = Array.isArray(names)
+      ? names.map((name, value) => ({ value, name }))
+      : Object.entries(names).map(([value, name]) => ({ value: Number(value), name: String(name) }));
+    return entries.filter((c) => Number.isFinite(c.value)).sort((a, b) => a.value - b.value);
   }
 
   async function loadInstances() {
@@ -1043,6 +1261,9 @@ export function createSegmentation({
     }
     state.preview = null;
     render();
+    // Ask the service what it can load, the first time the tab is opened against
+    // an endpoint. Cheap, and it fails quietly on a service without a catalogue.
+    if (state.models.list === null && state.models.error === null) loadModels();
     try {
       const p = await fetchJson(`/api/scenes/${encId(info.id)}/segment/preview`);
       p.scene = info.id;

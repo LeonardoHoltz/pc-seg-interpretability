@@ -153,9 +153,19 @@ export async function runSaliency(sceneId, opts = {}) {
   const label = `Saliency · ${METHOD_LABEL[method] ?? method} · `
     + `${className ?? (classValue == null ? "top class" : `class ${classValue}`)} (object #${instanceId})`;
 
+  // Attribution is long-tailed: a handful of points an order of magnitude above
+  // the rest, and everything else near zero. Scaled to the peak, the whole
+  // cloud opens as one neutral grey. So record a robust span alongside the true
+  // one and let the viewer open on that; the full range is still a drag away.
+  const magnitudes = Array.from(values, Math.abs).sort((a, b) => a - b);
+  const p98 = magnitudes[Math.floor(magnitudes.length * 0.98)] || magnitudes.at(-1) || 1;
+
   const { scene: updated } = rewriteSceneWithAttributes(sceneId, {
     cacheDir: cacheDirFor(sceneId),
-    add: [{ name: attribute, label, kind: "continuous", values }],
+    add: [{
+      name: attribute, label, kind: "continuous", values,
+      displayRange: [-p98, p98],
+    }],
     onProgress,
   });
 
@@ -165,6 +175,7 @@ export async function runSaliency(sceneId, opts = {}) {
   const record = {
     attribute, label, endpoint, at: Date.now(),
     instanceId, classValue, className: className ?? null, method,
+    displayRange: [-p98, p98],
     objectPoints,
     scope: scoped ? "object" : "scene",
     range: [lo, hi],
