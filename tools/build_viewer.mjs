@@ -40,7 +40,9 @@ function buildSource() {
     return;
   }
   console.log("[build-viewer] npm install + gulp build (this takes a minute) ...");
-  run("npm", ["install", "--no-audit", "--no-fund"], SRC);
+  // npm is npm.cmd on Windows, which execFileSync does not resolve on its own.
+  run(process.platform === "win32" ? "npm.cmd" : "npm",
+      ["install", "--no-audit", "--no-fund"], SRC);
 }
 
 // [source relative to the Potree checkout, destination relative to web/vendor/potree]
