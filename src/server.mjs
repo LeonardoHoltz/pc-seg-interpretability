@@ -34,7 +34,7 @@ import { createReadStream, existsSync, statSync, readFileSync, writeFileSync } f
 import { join, resolve, extname, normalize } from "node:path";
 import { Worker } from "node:worker_threads";
 import { randomUUID } from "node:crypto";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { WEB_DIR, CACHE_DIR, SCENES_DIR, ROOT } from "./paths.mjs";
 import { config, publicConfig } from "./config.mjs";
 import { listScenes, describeScene, resolveScene, cacheDirFor, datasetForId, readSidecar } from "./scene/registry.mjs";
@@ -756,7 +756,7 @@ const server = createServer((req, res) => {
   }
 });
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   const argv = process.argv.slice(2);
   const flag = (n, d) => { const i = argv.indexOf(`--${n}`); return i === -1 ? d : argv[i + 1]; };
   // Flags beat the environment, which beats config/app.json (see config.mjs).

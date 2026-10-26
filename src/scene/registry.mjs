@@ -7,6 +7,7 @@
  * octree exists in the cache that is newer than the source.
  */
 import { readdirSync, statSync, existsSync, readFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 import { join, relative, sep, extname, basename } from "node:path";
 import { CACHE_DIR, CONFIG_DIR, DATASETS } from "../paths.mjs";
 import { readCloudHeader, isNpyScene, NPY_REQUIRED } from "../io/cloud.mjs";
@@ -228,7 +229,7 @@ export function resolveScene(id) {
 }
 
 // CLI: `npm run scan`
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   const scenes = listScenes();
   const roots = DATASETS.map((d) => `${d.name} -> ${d.path}`).join("\n    ");
   if (scenes.length === 0) {

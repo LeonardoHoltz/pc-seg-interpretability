@@ -7,6 +7,7 @@
  *   npm run convert -- --all
  */
 import { existsSync, rmSync, writeFileSync, readFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 import { join } from "node:path";
 import { readCloud } from "../io/cloud.mjs";
 import { describeFields } from "./fields.mjs";
@@ -284,7 +285,7 @@ export function convertScene(id, options = {}) {
 }
 
 // ---- CLI ----------------------------------------------------------------
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   const argv = process.argv.slice(2);
   const flag = (name, fallback = null) => {
     const i = argv.indexOf(`--${name}`);
