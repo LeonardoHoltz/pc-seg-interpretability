@@ -720,11 +720,10 @@ is enough.
 It also passes `model.backbone.shuffle_orders=False`. LitePT and PTv3 call
 `serialization(shuffle_orders=True)`, which draws a `torch.randperm` on *every* forward —
 at eval too — so each position of a sweep would otherwise carry a different permutation.
-Pass `--allow-shuffle` to keep it. Note this removes the deliberate randomness but not all
-of it: the sparse kernels accumulate with atomics, so two identical requests still differ.
-On a 237k-point ScanNet scene that came to **0.6–1.4% of points changing predicted label**
-between runs (single-scene accuracy 88.9 / 89.2 / 89.0%). Worth knowing before reading a
-small difference between two sweep positions as signal.
+Pass `--allow-shuffle` to keep it. This removes the deliberate randomness but not all of
+it: the sparse kernels accumulate with atomics, so two identical requests still differ by
+around a percent of points. Worth knowing before reading a small difference between two
+sweep positions as signal.
 
 Without docker, the entry point is the same:
 
@@ -901,18 +900,9 @@ class. So the names travel with the model, and switching model switches the lege
 rather than leaving the old words over new numbers.
 
 The catalogue is **re-read on every request**, so adding a checkpoint or fixing a wrong
-config costs no restart. A failed load leaves the previous model serving — the new engine is
-built before the old one is let go, and the error comes back to the caller:
-
-```
-POST /models {"model": "ptv3-s3dis13"}
--> 400 RuntimeError: Unexpected key(s) in state_dict: "...attn.rpe.rpe_table"   (0.4s)
-   model: litept-scannet20     <- still loaded, still answering
-```
-
-That is a real example: the first version of the catalogue pointed that checkpoint at
-`-0-base.py` when it wants `-1-rpe.py`. GPU memory is returned on a successful switch —
-measured 11.8 GiB → 1.6 GiB going from PTv3 back to LitePT.
+config costs no restart. A failed load leaves the previous model serving: the new engine is built before the old one
+is let go, and the error comes back to the caller. GPU memory is returned on a successful
+switch.
 
 #### Methods
 
@@ -942,41 +932,15 @@ scenes: it would concatenate two clouds into one and attribute the result. The t
 where the model is locally linear; integrated gradients is the honest check, and on this
 model it is also the one that works — see below.
 
-#### What it found
+#### Defaults
 
-On ScanNet `val/scene0019_00`, sofa #3 (6,331 points), LitePT-small, attributing over
-coordinates *and* features:
+Attribution runs over **geometry and features** (`both`), not the server's
+`--saliency-input`: removing a point takes away its position as well as its colour, so a
+colour-only ranking answers a different question than the ablation asks.
 
-Every method, both directions, 3,000 of 6,331 points removed. The **control** removes the
-points the same map ranks *least* sofa-ish; a method whose ranking means something should
-hurt far more in the first direction than the second.
-
-| method | P(sofa) drop, sofa−chair | control | separation |
-| --- | --- | --- | --- |
-| gradients | −0.028 | −0.017 | 1.6× |
-| input × gradient | −0.037 | −0.009 | 4.2× |
-| DeepLIFT | −0.015 | −0.017 | **0.9×** |
-| integrated gradients | −0.048 | −0.009 | **5.5×** |
-
-The control is what makes this readable. **Integrated gradients ranks best** — removing the
-points it calls sofa-ish costs five and a half times what removing the ones it calls
-chair-ish does. **DeepLIFT's single-backward form does not rank at all**: at 0.9× it is
-indistinguishable from its own opposite, and that is not noise — repeat runs of this model
-differ by ~10⁻³ on logits, two orders below the gap between 0.9× and 5.5×. So the ablation
-defaults to integrated gradients and warns when you pick DeepLIFT. All four stay selectable;
-the comparison is the point.
-
-And the headline: **the sofa does not become a chair.** Pushed to 5,000 of 6,331 points,
-P(sofa) falls 0.97 → 0.44 while P(chair) only ever reaches 2×10⁻³, and the majority label
-never changes. Removing the evidence for *sofa* destroys sofa-ness without manufacturing
-chair-ness. Unlike an 8 and a 3, which share most of their strokes, the two classes do not
-sit on a shared manifold for this model — and a sofa with four fifths of its points gone is
-a sparse blob, not a chair.
-
-Attribution defaults to `both` (geometry and features) for this experiment rather than the
-server's `--saliency-input`: removing a point takes away its position as well as its colour,
-and a colour-only ranking measurably did not rank — it was the first version of the table
-above, and the control beat it.
+The method defaults to **integrated gradients**, which on this model ranked the points far
+better than DeepLIFT's single-backward form; the panel says so when you pick DeepLIFT. All
+four stay selectable — comparing them is the point.
 
 ### Interpretability: saliency
 
@@ -1020,10 +984,8 @@ poles are a validated pair (ΔE 19.2 protan, 29.0 normal against this surface), 
 is generated by the same function the ablation frames use, so a map reads identically in
 both places. Any field that spans zero gets this treatment, `normal_x` included.
 
-It also opens on a **robust** range rather than the full one. Attribution is long-tailed:
-on a real run the extremes were ±1.0 while the 98th percentile of magnitude was ±0.031, so
-scaling to the extremes showed one grey cloud. The analysis records where the ramp should
-open; the full span is still a drag away.
+It also opens on a **robust** range rather than the full one — attribution is long-tailed,
+and scaling to its extremes shows one grey cloud. The full span is still a drag away.
 
 **Every scalar keeps its own ramp and its own range.** Setting `normal_x` to viridis leaves
 a saliency field on diverging; the mapping is remembered per attribute for as long as the
@@ -1113,7 +1075,7 @@ exactly. Every array read was checked element-for-element against numpy.
 
 Files that carry both a packed `rgb` field *and* its unpacked `r`,`g`,`b` duplicates (some
 exporters write both) get the duplicates dropped, after checking on a sample that they
-really do match — that alone saved 24% of the octree size on a real 422k-point scan.
+really do match, which keeps the octree noticeably smaller.
 Integer fields that are not named like labels need 32 or fewer distinct values to be
 treated as categorical, so things like voxel indices stay continuous instead of producing
 a 200-entry legend.
