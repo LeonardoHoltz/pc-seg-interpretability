@@ -21,8 +21,8 @@ const OUT = join(ROOT, "web", "vendor", "potree");
 
 const POTREE_REPO = "https://github.com/potree/potree.git";
 
-const run = (cmd, args, cwd) =>
-  execFileSync(cmd, args, { cwd, stdio: "inherit", env: process.env });
+const run = (cmd, args, cwd, opts) =>
+  execFileSync(cmd, args, { cwd, stdio: "inherit", env: process.env, ...opts });
 
 function fetchSource() {
   if (existsSync(join(SRC, "package.json"))) {
@@ -40,9 +40,10 @@ function buildSource() {
     return;
   }
   console.log("[build-viewer] npm install + gulp build (this takes a minute) ...");
-  // npm is npm.cmd on Windows, which execFileSync does not resolve on its own.
-  run(process.platform === "win32" ? "npm.cmd" : "npm",
-      ["install", "--no-audit", "--no-fund"], SRC);
+  // npm is npm.cmd on Windows, and Node refuses to spawn a .cmd without a shell
+  // (CVE-2024-27980). Only here: the args are literals.
+  run("npm", ["install", "--no-audit", "--no-fund"], SRC,
+      { shell: process.platform === "win32" });
 }
 
 // [source relative to the Potree checkout, destination relative to web/vendor/potree]
