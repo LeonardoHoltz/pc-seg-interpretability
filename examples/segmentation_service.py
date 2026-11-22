@@ -57,8 +57,9 @@ one request. Alongside the usual arrays you get
     mask         uint8    (N,)       1 for the points of the object being moved
 
 and a `ceteris_paribus` block in the header with `direction` (a unit vector),
-`offsets` (how far to move along it) and the absolute `heights` they correspond
-to. Move the masked points yourself and reply with
+`offsets` (how far to move along it), `axis`, absolute axis `positions`, and the
+object's original XYZ `anchor`. `heights` records actual Z values, which remain
+constant in X/Y sweeps. Move the masked points yourself and reply with
 
     logits       float32  (S, C, M)  sweep position, class, masked point
 
@@ -152,7 +153,8 @@ def segment(header, arrays):
 def sweep(header, arrays):
     """
     Ceteris paribus: move the masked object along `direction` by each offset and
-    return the object's logits at every position.
+    return the object's logits at every position. The viewer selects X, Y or Z;
+    this mock scores height alone, so X/Y sweeps correctly produce flat curves.
 
     The scene arrived once, so only the masked coordinates are touched between
     positions -- everything else is genuinely held constant.

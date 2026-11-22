@@ -3,7 +3,7 @@
  *
  * Holds a scene fixed, moves one object along a direction, and asks the model how
  * its prediction for that object changes. Plotting the object's mean probability
- * for a chosen class against height shows how much the prediction depends on
+ * for a chosen class against X, Y or Z shows how much the prediction depends on
  * where the object sits rather than on what it looks like.
  *
  * The whole sweep is **one request**. The scene goes out once, together with a
@@ -23,9 +23,33 @@ import { config } from "../config.mjs";
 /** Reads the scene once and lays out the arrays the service expects. */
 function prepare(sceneId, fields) {
   const { scene, octree, n } = readSceneForInference(sceneId);
-  // xyz occupies one array; z is its last third and the only part a sweep moves.
-  const { arrays, xyz } = sceneArrays(scene, octree, { fields });
-  return { scene, octree, n, arrays, xyz, baseZ: Float32Array.from(octree.z) };
+  const { arrays } = sceneArrays(scene, octree, { fields });
+  return { scene, octree, n, arrays };
+}
+
+/** Shared by the HTTP route and direct callers; validate before allocating a range. */
+export function parseCeterisSweep(opts = {}) {
+  const axis = opts.axis ?? "z";
+  if (!["x", "y", "z"].includes(axis)) throw new Error("axis must be x, y or z");
+  if (opts.heights !== undefined && (axis !== "z" || opts.positions !== undefined)) {
+    throw new Error("heights is only supported for Z; use positions for an axis sweep");
+  }
+  let positions = opts.positions ?? opts.heights;
+  if (positions === undefined) {
+    const { min, max, steps } = opts.range ?? {};
+    if (![min, max].every(Number.isFinite) || !Number.isInteger(steps) || steps < 2 || steps > 256) {
+      throw new Error("give positions[] or range {min, max, steps: integer from 2 to 256}");
+    }
+    positions = Array.from({ length: steps }, (_, i) => {
+      const t = i / (steps - 1);
+      return min * (1 - t) + max * t;
+    });
+  }
+  if (!Array.isArray(positions) || positions.length < 1 || positions.length > 256
+      || !positions.every(Number.isFinite)) {
+    throw new Error("positions must contain 1 to 256 finite numbers");
+  }
+  return { axis, positions };
 }
 
 /** Point indices belonging to one object, via the scene's instance field. */
@@ -105,27 +129,47 @@ function readSweep(decoded, { numSteps, numObjectPoints, classValue }) {
 /**
  * @param opts.instanceId  which object to move
  * @param opts.classValue  the class whose probability is plotted
- * @param opts.heights     absolute heights (metres) for the object's base
+ * @param opts.axis        x, y or z (default z); only this coordinate changes
+ * @param opts.positions   absolute anchor coordinates in metres along that axis
+ * @param opts.heights     legacy alias for positions on Z
+ * @param opts.range       alternative to positions: {min, max, steps}
  */
 export async function runCeterisParibus(sceneId, opts = {}) {
   const {
-    endpoint, instanceId, classValue, heights,
-    direction = [0, 0, 1],
+    endpoint, instanceId, classValue,
     fields = null, timeoutMs = config.inference.timeouts.ceteris, onProgress = () => {},
   } = opts;
 
   if (!endpoint) throw new Error("no inference endpoint configured");
-  if (!Array.isArray(heights) || heights.length === 0) throw new Error("no heights to sweep");
-  if (heights.length > 256) throw new Error("keep the sweep under 256 positions");
+  if (!Number.isFinite(instanceId)) throw new Error("instanceId is required");
+  if (!Number.isFinite(classValue)) throw new Error("classValue is required");
+  const { axis, positions } = parseCeterisSweep(opts);
+  const axisIndex = ["x", "y", "z"].indexOf(axis);
+  // Retain the direct caller's direction hook; the UI uses the three unit axes.
+  const direction = opts.direction ?? [0, 1, 2].map((a) => Number(a === axisIndex));
+  if (!Array.isArray(direction) || direction.length !== 3
+      || !direction.every(Number.isFinite) || Math.hypot(...direction) === 0) {
+    throw new Error("direction must be a nonzero finite XYZ vector");
+  }
 
   onProgress({ phase: "reading", progress: 0.05, message: "Reading the scene" });
-  const { scene, octree, n, arrays, baseZ } = prepare(sceneId, fields);
+  const { scene, octree, n, arrays } = prepare(sceneId, fields);
   const indices = objectIndices(scene, octree, instanceId);
 
-  // The object's base is its lowest point; the sweep moves that to each height.
-  let objectBase = Infinity;
-  for (const i of indices) if (baseZ[i] < objectBase) objectBase = baseZ[i];
-  const offsets = heights.map((h) => h - objectBase);
+  // Same anchor as the object library: footprint centre X/Y, lowest point Z.
+  const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
+  const coords = [octree.x, octree.y, octree.z];
+  for (const i of indices) for (let a = 0; a < 3; a++) {
+    min[a] = Math.min(min[a], coords[a][i]);
+    max[a] = Math.max(max[a], coords[a][i]);
+  }
+  const objectAnchor = [(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, min[2]];
+  const objectBase = objectAnchor[2];
+  const offsets = positions.map((p) => p - objectAnchor[axisIndex]);
+  const translations = offsets.map((offset) => direction.map((d) => d * offset));
+  const anchors = translations.map((delta) => objectAnchor.map((p, a) => p + delta[a]));
+  if (anchors.some((p) => !p.every(Number.isFinite))) throw new Error("sweep coordinates overflow");
+  const heights = anchors.map((p) => p[2]);
 
   // A uint8 mask is the shape numpy wants: `sel = mask.astype(bool)` then
   // `xyz[:, sel]`. It also fixes the order the reply's object columns follow.
@@ -141,16 +185,19 @@ export async function runCeterisParibus(sceneId, opts = {}) {
       object_points: indices.length,
       direction,
       offsets,
+      axis,
+      positions,
+      anchor: objectAnchor,
       heights,
       base: objectBase,
       // What the reply should contain, so the service need not guess.
-      expects: { logits: [heights.length, "C", indices.length] },
+      expects: { logits: [positions.length, "C", indices.length] },
     },
   });
 
   onProgress({
     phase: "sending", progress: 0.2,
-    message: `Sending the scene once with ${heights.length} positions ` +
+    message: `Sending the scene once with ${positions.length} ${axis.toUpperCase()} positions ` +
              `(${(body.length / 1048576).toFixed(1)} MiB)`,
   });
 
@@ -181,7 +228,7 @@ export async function runCeterisParibus(sceneId, opts = {}) {
   onProgress({ phase: "decoding", progress: 0.85, message: "Reading the logits" });
   const decoded = decodeArrays(raw);
   const { measure, values } = readSweep(decoded, {
-    numSteps: heights.length,
+    numSteps: positions.length,
     numObjectPoints: indices.length,
     classValue,
   });
@@ -195,10 +242,15 @@ export async function runCeterisParibus(sceneId, opts = {}) {
     classes: decoded.meta.classes ?? null,
     objectPoints: indices.length,
     objectBase,
+    objectAnchor,
+    axis,
     direction,
     measure,
     requestBytes: body.length,
     responseBytes: raw.length,
-    steps: heights.map((height, i) => ({ height, value: values[i] })),
+    steps: positions.map((coordinate, i) => ({
+      coordinate, position: anchors[i], translation: translations[i],
+      offset: offsets[i], height: heights[i], value: values[i],
+    })),
   };
 }

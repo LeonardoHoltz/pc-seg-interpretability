@@ -43,7 +43,7 @@ src/
     predict.mjs     segment the scene, fold labels back in
     saliency.mjs    per-point saliency for one object
     ablation.mjs    two class heatmaps, their difference, and what survives it
-    ceteris.mjs     sweep one object through heights, in one request
+    ceteris.mjs     sweep one object along X, Y or Z, in one request
 
   workers/        thin worker_thread entry points, one per long job
     convert.mjs  bake.mjs  resample.mjs
