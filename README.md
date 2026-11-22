@@ -789,10 +789,10 @@ A few things worth knowing:
 
 ### Interpretability: ceteris paribus
 
-The tab's **Interpretability** section holds the scene fixed, moves one object through a
-range of heights, and plots the object's **mean probability for a class you choose**
-against the height it was placed at. If the curve is flat the model is judging the object
-on its own shape; if it slopes, the model is leaning on where the object sits.
+The tab's **Interpretability** section holds the scene fixed and moves one object along
+**X, Y or Z**, varying one coordinate at a time. It plots the object's **mean probability
+for a class you choose** against that coordinate. A changing curve shows sensitivity to
+position; a flat curve means no measured sensitivity along that axis over the sampled range.
 
 The focus object can be chosen from the dropdown or by **clicking it in the viewport** —
 press **◎ Pick**, then click the object; Esc cancels. Picking is armed explicitly rather
@@ -806,13 +806,19 @@ question in a room with no lamp. The names come from the sidecar at request time
 `classes.json` is enough; no reconversion. After a segmentation has run the list comes from
 the prediction itself instead, which is the set of ids the model actually returned.
 
-Pick the object, the class and a height sweep (from / to / steps), and the result appears
-as a line chart with a table view beside it. Nothing is written to the scene — this is
-analysis, so the octree is read but never rebuilt.
+Pick the object, the class, the **Sweep axis**, and a range (from / to / steps). X and Y
+are absolute coordinates of the object's footprint centre; Z is the absolute height of
+its lowest point, all in metres. The other two coordinates, object geometry, colour,
+normals and background stay fixed. Each axis starts with the scene's bounds and remembers
+its edited range while the scene is open. Z is selected by default.
+
+The result appears as a line chart with a table view beside it, labelled with the axis
+used for that run. Nothing is written to the scene — the octree is read but never rebuilt.
+Sweeps accept 2–256 steps in the controls; explicit API position lists accept 1–256.
 
 **Hovering a point on the curve draws the object where it actually was** when the model
-scored it: a translucent copy at that height, outlined so it can be found inside a dense
-cloud. Hovering a table row does the same, so the feature is not mouse-only. The copy is
+scored it: a translucent copy at that XYZ position, outlined so it can be found inside a dense
+cloud. Hovering or keyboard-focusing a table row does the same. The copy is
 loaded once when the chart appears and only attached and detached as the pointer moves, so
 tracing the curve reloads nothing. It is excluded from picking, so it can never be
 mistaken for the scene or become a surface to drop objects onto.
@@ -821,8 +827,11 @@ mistaken for the scene or become a surface to drop objects onto.
 
     mask         uint8    (N,)   1 for the points of the object being moved
 
-and a `ceteris_paribus` block in the header carrying `direction` (a unit vector),
-`offsets` along it and the absolute `heights` they correspond to. The service moves the
+and a `ceteris_paribus` block in the header carrying `direction` (the selected unit axis),
+`offsets` along it, `axis`, absolute axis `positions`, and the original XYZ `anchor`.
+The existing `heights` and `base` fields still describe the actual Z coordinates, so
+heights stay constant during X/Y sweeps. Existing services continue to use `direction`
+and `offsets` without changes. The service moves the
 masked points itself and replies with
 
     logits       float32  (S, C, M)   sweep position, class, masked point
@@ -834,6 +843,24 @@ model already normalises; the viewer applies the softmax otherwise.
 Sending the scene once rather than once per position is what makes this affordable: a
 nine-step sweep over a 422k-point scan is a single 23 MiB request with 11 MiB back, not
 nine 23 MiB requests. The reply covers only the object rather than the whole cloud.
+
+For example, `POST /api/scenes/:id/ceteris` accepts:
+
+```json
+{
+  "endpoint": "http://127.0.0.1:8500/",
+  "instanceId": 3,
+  "classValue": 4,
+  "axis": "x",
+  "range": { "min": -2, "max": 2, "steps": 9 }
+}
+```
+
+Use `positions: [-2, 0, 2]` instead of `range` for explicit coordinates. Omitting `axis`
+defaults to Z; existing `heights: [...]` requests still work for Z. Each result step
+includes `coordinate`, XYZ `position`, XYZ `translation`, signed `offset`, actual
+`height`, and mean probability `value`. The bundled mock uses height alone, so its X/Y
+curves are flat by design; use a trained service to measure spatial sensitivity.
 
 ### Interpretability: ablation (A minus B)
 
@@ -1185,7 +1212,7 @@ src/
     npbuffer.mjs   the binary wire format
     predict.mjs    segment the scene, fold labels back in
     saliency.mjs   per-point saliency for one object
-    ceteris.mjs    sweep one object through heights, one request
+    ceteris.mjs    sweep one object along X, Y or Z, one request
 
   workers/       thin worker_thread entry points, one per long job
     convert.mjs  bake.mjs  resample.mjs

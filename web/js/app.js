@@ -102,11 +102,14 @@ const segmentation = createSegmentation({
     if (opt) selectAttribute(opt);
   },
   // Hovering the ceteris paribus curve puts a translucent copy of the object
-  // where it sat when the model scored it at that height.
-  onHoverStep: ({ instanceId, height }) => {
+  // where it sat when the model scored it along any of the three axes.
+  onHoverStep: ({ instanceId, translation, height }) => {
     const entry = instances.sceneInstances().find((e) => e.id === instanceId);
     if (!entry) return;
-    instances.showGhost(entry, [entry.anchor[0], entry.anchor[1], height]);
+    const position = translation
+      ? entry.anchor.map((p, a) => p + translation[a])
+      : [entry.anchor[0], entry.anchor[1], height];
+    instances.showGhost(entry, position);
   },
   onHoverEnd: () => instances.hideGhost(),
   onPreload: ({ instanceId }) => {

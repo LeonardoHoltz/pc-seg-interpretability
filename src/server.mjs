@@ -13,7 +13,7 @@
  *   /api/scenes/:id/segment/preview  what a segmentation request would send
  *   /api/scenes/:id/segment  send the points to an inference service and fold
  *                           the returned labels back in as an attribute
- *   /api/scenes/:id/ceteris  sweep one object through a range of heights and
+ *   /api/scenes/:id/ceteris  sweep one object along X, Y or Z and
  *                           report its mean class probability at each
  *   /api/scenes/:id/saliency  ask the service for a per-point scalar about one
  *                           object and add it to the scene as an attribute
@@ -39,6 +39,7 @@ import { WEB_DIR, CACHE_DIR, SCENES_DIR, ROOT } from "./paths.mjs";
 import { config, publicConfig } from "./config.mjs";
 import { listScenes, describeScene, resolveScene, cacheDirFor, datasetForId, readSidecar } from "./scene/registry.mjs";
 import { previewPayload } from "./inference/predict.mjs";
+import { parseCeterisSweep } from "./inference/ceteris.mjs";
 import { sceneThumbnail } from "./scene/thumbnail.mjs";
 import { readOctree } from "./octree/read.mjs";
 
@@ -585,7 +586,7 @@ function handle(req, res) {
     }).catch((err) => sendError(res, 400, err.message));
   }
 
-  // Move one object through a range of heights, segmenting the scene at each.
+  // Move one object along one spatial axis, holding the other coordinates fixed.
   m = /^\/api\/scenes\/(.+)\/ceteris$/.exec(path);
   if (m && req.method === "POST") {
     const id = decodeURIComponent(m[1]);
@@ -597,26 +598,19 @@ function handle(req, res) {
       if (!/^https?:\/\//i.test(endpoint)) {
         return sendError(res, 400, "endpoint must be an http(s) URL");
       }
-      const instanceId = Number(body.instanceId);
-      const classValue = Number(body.classValue);
+      const instanceId = body.instanceId == null ? NaN : Number(body.instanceId);
+      const classValue = body.classValue == null ? NaN : Number(body.classValue);
       if (!Number.isFinite(instanceId)) return sendError(res, 400, "instanceId is required");
       if (!Number.isFinite(classValue)) return sendError(res, 400, "classValue is required");
 
-      let heights = body.heights;
-      if (!Array.isArray(heights)) {
-        const { min, max, steps } = body.range ?? {};
-        if (![min, max, steps].every(Number.isFinite) || steps < 2) {
-          return sendError(res, 400, "give either heights[] or range {min, max, steps>=2}");
-        }
-        heights = Array.from({ length: steps },
-          (_, i) => min + ((max - min) * i) / (steps - 1));
-      }
+      const { axis, positions } = parseCeterisSweep(body);
 
       const job = startCeteris(id, {
-        endpoint, instanceId, classValue, heights,
+        endpoint, instanceId, classValue, axis, positions,
         fields: Array.isArray(body.fields) ? body.fields : null,
       });
-      sendJson(res, 202, { jobId: job.id, heights });
+      sendJson(res, 202, { jobId: job.id, axis, positions,
+        ...(axis === "z" ? { heights: positions } : {}) });
     }).catch((err) => sendError(res, 400, err.message));
   }
 

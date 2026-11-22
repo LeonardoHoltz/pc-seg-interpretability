@@ -26,11 +26,11 @@ export function createSegmentation({
 }) {
   const state = {
     preview: null, endpoint: "", running: false, excluded: new Set(),
-    // Ceteris paribus: move one object through a range of heights and watch one
+    // Ceteris paribus: move one object along X, Y or Z and watch one
     // class's probability respond.
     cp: {
       instances: null, instanceId: null, classValue: null,
-      min: null, max: null, steps: 9,
+      axis: "z", ranges: {}, steps: 9,
       running: false, status: "", result: null, view: "chart",
     },
     // Saliency: one scalar per point, aggregated however the service sees fit.
@@ -71,6 +71,7 @@ export function createSegmentation({
   function render() {
     const host = $("#segmentation-body");
     if (!host) return;
+    onHoverEnd?.();
     host.innerHTML = "";
 
     const info = getSceneInfo();
@@ -228,6 +229,24 @@ export function createSegmentation({
   api.render = render;
 
   // ------------------------------------------------- ceteris paribus panel
+  const axisLabel = (axis) => axis === "z" ? "Z height" : `${axis.toUpperCase()} position`;
+  const sweepCoordinate = (step) => step.coordinate ?? step.height;
+
+  function previewStep(result, step) {
+    if (result.scene !== getSceneInfo()?.id) return;
+    onHoverStep?.({
+      instanceId: result.instanceId, translation: step.translation, height: step.height,
+    });
+  }
+
+  function sweepRange(info, axis) {
+    const a = ["x", "y", "z"].indexOf(axis);
+    return state.cp.ranges[axis] ??= {
+      min: info?.tightBoundingBox?.min[a] ?? 0,
+      max: info?.tightBoundingBox?.max[a] ?? 1,
+    };
+  }
+
   /**
    * Draws the sweep as a line chart.
    *
@@ -238,13 +257,14 @@ export function createSegmentation({
    */
   function drawChart(host, result) {
     const steps = result.steps;
+    const label = axisLabel(result.axis ?? "z");
     const W = Math.max(240, host.clientWidth || 292);
     const H = 190;
     const m = { top: 14, right: 12, bottom: 30, left: 40 };
     const iw = W - m.left - m.right;
     const ih = H - m.top - m.bottom;
 
-    const xs = steps.map((s) => s.height);
+    const xs = steps.map(sweepCoordinate);
     const xMin = Math.min(...xs), xMax = Math.max(...xs);
     const xSpan = (xMax - xMin) || 1;
     const px = (h) => m.left + ((h - xMin) / xSpan) * iw;
@@ -260,7 +280,7 @@ export function createSegmentation({
     const root = svg("svg", {
       viewBox: `0 0 ${W} ${H}`, width: "100%", height: String(H),
       class: "cp-chart", role: "img",
-      "aria-label": `Mean probability of the selected class against object height`,
+      "aria-label": `Mean probability of the selected class against object ${label}`,
     });
 
     // gridlines + y ticks
@@ -276,7 +296,7 @@ export function createSegmentation({
     }
 
     // x ticks: at most four, so they never collide in a narrow panel
-    const tickCount = Math.min(4, steps.length);
+    const tickCount = xMin === xMax ? 1 : Math.min(4, steps.length);
     for (let i = 0; i < tickCount; i++) {
       const h = xMin + (xSpan * i) / (tickCount - 1 || 1);
       root.appendChild(svg("text", {
@@ -286,7 +306,7 @@ export function createSegmentation({
     }
     root.appendChild(svg("text", {
       x: m.left + iw / 2, y: H - 0.5, "text-anchor": "middle", class: "cp-axis",
-    }, "object height (m)"));
+    }, `${label} (m)`));
 
     // baseline
     root.appendChild(svg("line", {
@@ -295,7 +315,7 @@ export function createSegmentation({
     }));
 
     // the series
-    const d = steps.map((s, i) => `${i ? "L" : "M"}${px(s.height).toFixed(1)},${py(s.value).toFixed(1)}`).join("");
+    const d = steps.map((s, i) => `${i ? "L" : "M"}${px(sweepCoordinate(s)).toFixed(1)},${py(s.value).toFixed(1)}`).join("");
     root.appendChild(svg("path", {
       d, fill: "none", stroke: SERIES, "stroke-width": 2,
       "stroke-linejoin": "round", "stroke-linecap": "round",
@@ -304,7 +324,7 @@ export function createSegmentation({
     for (const s of steps) {
       // A surface ring keeps neighbouring markers apart where the line is steep.
       root.appendChild(svg("circle", {
-        cx: px(s.height), cy: py(s.value), r: 4,
+        cx: px(sweepCoordinate(s)), cy: py(s.value), r: 4,
         fill: SERIES, stroke: "var(--bg-panel)", "stroke-width": 2,
       }));
     }
@@ -312,9 +332,9 @@ export function createSegmentation({
     // one direct label, on the peak
     const peak = steps.reduce((a, b) => (b.value > a.value ? b : a), steps[0]);
     root.appendChild(svg("text", {
-      x: Math.min(px(peak.height) + 8, m.left + iw),
+      x: Math.min(px(sweepCoordinate(peak)) + 8, m.left + iw),
       y: Math.max(py(peak.value) - 8, m.top + 8),
-      "text-anchor": px(peak.height) > m.left + iw * 0.7 ? "end" : "start",
+      "text-anchor": px(sweepCoordinate(peak)) > m.left + iw * 0.7 ? "end" : "start",
       class: "cp-peak",
     }, peak.value.toFixed(3)));
 
@@ -338,21 +358,22 @@ export function createSegmentation({
       const xPix = ((event.clientX - box.left) / box.width) * W;
       let best = steps[0], bestD = Infinity;
       for (const s of steps) {
-        const dd = Math.abs(px(s.height) - xPix);
+        const dd = Math.abs(px(sweepCoordinate(s)) - xPix);
         if (dd < bestD) { bestD = dd; best = s; }
       }
-      crosshair.setAttribute("x1", px(best.height));
-      crosshair.setAttribute("x2", px(best.height));
+      crosshair.setAttribute("x1", px(sweepCoordinate(best)));
+      crosshair.setAttribute("x2", px(sweepCoordinate(best)));
       crosshair.setAttribute("opacity", 1);
       tip.style.display = "";
-      tip.textContent = `${best.height.toFixed(2)} m · ${best.value.toFixed(3)}`;
-      tip.style.left = `${Math.min(Math.max((px(best.height) / W) * box.width - 40, 0), box.width - 90)}px`;
+      tip.textContent = `${label}: ${sweepCoordinate(best).toFixed(2)} m · ${best.value.toFixed(3)}`;
+      const tipWidth = tip.offsetWidth;
+      tip.style.left = `${Math.max(0, Math.min((px(sweepCoordinate(best)) / W) * box.width - tipWidth / 2, box.width - tipWidth))}px`;
       tip.style.top = `${(py(best.value) / H) * box.height - 30}px`;
 
       // Show the object where it actually was when the model scored it.
       if (best !== hovered) {
         hovered = best;
-        onHoverStep?.({ instanceId: result.instanceId, height: best.height });
+        previewStep(result, best);
       }
     });
     hit.addEventListener("mouseleave", () => {
@@ -371,22 +392,24 @@ export function createSegmentation({
   function drawTable(host, result) {
     const table = el("table", "cp-table");
     const head = el("tr");
-    head.appendChild(el("th", null, "height (m)"));
+    head.appendChild(el("th", null, `${axisLabel(result.axis ?? "z")} (m)`));
     head.appendChild(el("th", null, "mean probability"));
     table.appendChild(head);
     for (const s of result.steps) {
       const tr = el("tr");
-      tr.appendChild(el("td", null, s.height.toFixed(2)));
+      tr.tabIndex = 0;
+      tr.appendChild(el("td", null, sweepCoordinate(s).toFixed(2)));
       tr.appendChild(el("td", null, s.value.toFixed(4)));
-      tr.addEventListener("mouseenter", () =>
-        onHoverStep?.({ instanceId: result.instanceId, height: s.height }));
+      tr.addEventListener("mouseenter", () => previewStep(result, s));
+      tr.addEventListener("focus", () => previewStep(result, s));
+      tr.addEventListener("blur", () => onHoverEnd?.());
       table.appendChild(tr);
     }
     table.addEventListener("mouseleave", () => onHoverEnd?.());
     host.appendChild(table);
   }
 
-  /** The Interpretability section: pick an object, a class, a height range. */
+  /** The Interpretability section: pick an object, a class and a spatial axis. */
   function renderCeteris(host) {
     const info = getSceneInfo();
     const cp = state.cp;
@@ -494,17 +517,37 @@ export function createSegmentation({
     }
     host.appendChild(clsCtl);
 
-    // --- height range ---
+    // --- spatial axis and range ---
     const cpBlock = el("div", "seg-block");
     cpBlock.appendChild(el("div", "seg-head-plain", "Ceteris paribus"));
     cpBlock.appendChild(el("div", "lib-meta",
-      "Hold the scene fixed, move the object through a range of heights, and " +
-      "watch the class's probability respond."));
+      "Move the object along X, Y or Z while holding the other two coordinates " +
+      "and the rest of the scene fixed."));
     host.appendChild(cpBlock);
 
+    const axisCtl = el("div", "ctl");
+    const axisTitle = el("label");
+    axisTitle.appendChild(el("span", null, "Sweep axis"));
+    axisCtl.appendChild(axisTitle);
+    const axes = el("div", "segmented");
+    for (const axis of ["x", "y", "z"]) {
+      const b = el("button", cp.axis === axis ? "on" : "", axisLabel(axis));
+      b.setAttribute("aria-pressed", String(cp.axis === axis));
+      b.disabled = cp.running;
+      b.addEventListener("click", () => { cp.axis = axis; render(); });
+      axes.appendChild(b);
+    }
+    axisCtl.appendChild(axes);
+    host.appendChild(axisCtl);
+    host.appendChild(el("div", "lib-meta", cp.axis === "z"
+      ? "Absolute height of the object's base in metres; X and Y stay fixed."
+      : `Absolute ${cp.axis.toUpperCase()} coordinate of the object's footprint centre in metres; `
+        + `${cp.axis === "x" ? "Y" : "X"} and Z stay fixed.`));
+
+    const range = sweepRange(info, cp.axis);
     const rangeCtl = el("div", "ctl");
     const rangeLabel = el("label");
-    rangeLabel.appendChild(el("span", null, "Height sweep (m)"));
+    rangeLabel.appendChild(el("span", null, `${axisLabel(cp.axis)} sweep (m)`));
     rangeCtl.appendChild(rangeLabel);
     const row = el("div", "xyz cp-range");
     for (const [key, caption] of [["min", "from"], ["max", "to"], ["steps", "steps"]]) {
@@ -513,10 +556,12 @@ export function createSegmentation({
       const input = el("input");
       input.type = "number";
       input.step = key === "steps" ? "1" : "0.1";
-      input.value = String(key === "steps" ? cp.steps : (cp[key] ?? 0).toFixed(2));
+      input.disabled = cp.running;
+      if (key === "steps") { input.min = "2"; input.max = "256"; }
+      input.value = String(key === "steps" ? cp.steps : range[key]);
       input.addEventListener("change", () => {
-        const v = Number(input.value);
-        if (Number.isFinite(v)) cp[key] = key === "steps" ? Math.max(2, Math.round(v)) : v;
+        const v = input.valueAsNumber;
+        if (key === "steps") cp.steps = v; else range[key] = v;
       });
       cell.appendChild(input);
       row.appendChild(cell);
@@ -538,7 +583,7 @@ export function createSegmentation({
         ?? r.classNames?.[r.classValue] ?? `class ${r.classValue}`;
 
       const title = el("div", "cp-title");
-      title.appendChild(el("div", "cp-title-main", `Mean P(${name}) vs height`));
+      title.appendChild(el("div", "cp-title-main", `Mean P(${name}) vs ${axisLabel(r.axis ?? "z")}`));
       title.appendChild(el("div", "lib-meta",
         `object #${r.instanceId} · ${fmtInt(r.objectPoints)} points · ` +
         `one request, ${fmtBytes(r.requestBytes)} out / ${fmtBytes(r.responseBytes)} back`));
@@ -1197,10 +1242,6 @@ export function createSegmentation({
       cp.instances = [];
     }
     if (cp.instanceId == null && cp.instances.length) cp.instanceId = cp.instances[0].id;
-    if (cp.min == null && info.tightBoundingBox) {
-      cp.min = info.tightBoundingBox.min[2];
-      cp.max = info.tightBoundingBox.max[2];
-    }
     if (cp.classValue == null) cp.classValue = defaultClass(classChoices(info));
   }
 
@@ -1211,6 +1252,12 @@ export function createSegmentation({
     onHoverEnd?.();
     if (!/^https?:\/\//i.test(state.endpoint)) { toast("Set an http(s) endpoint first", true); return; }
     if (cp.instanceId == null) { toast("Pick an object first", true); return; }
+    const range = sweepRange(info, cp.axis);
+    if (![range.min, range.max].every(Number.isFinite) || !Number.isInteger(cp.steps)
+        || cp.steps < 2 || cp.steps > 256) {
+      toast("Enter finite coordinates and an integer from 2 to 256 steps", true);
+      return;
+    }
 
     cp.running = true;
     cp.status = "Starting…";
@@ -1223,11 +1270,12 @@ export function createSegmentation({
           endpoint: state.endpoint,
           instanceId: cp.instanceId,
           classValue: cp.classValue,
-          range: { min: cp.min, max: cp.max, steps: cp.steps },
+          axis: cp.axis,
+          range: { ...range, steps: cp.steps },
         }),
       });
 
-      cp.result = await new Promise((resolve, reject) => {
+      const result = await new Promise((resolve, reject) => {
         const es = new EventSource(`/api/jobs/${jobId}/events`);
         es.onmessage = (event) => {
           const msg = JSON.parse(event.data);
@@ -1239,6 +1287,7 @@ export function createSegmentation({
         };
         es.onerror = () => { es.close(); reject(new Error("lost contact with the analysis job")); };
       });
+      if (getSceneInfo()?.id === info.id) cp.result = result;
       cp.status = "";
     } catch (err) {
       cp.status = "";
@@ -1256,7 +1305,7 @@ export function createSegmentation({
     if (state.cp.scene !== info.id) {
       Object.assign(state.cp, {
         scene: info.id, instances: null, instanceId: null,
-        min: null, max: null, result: null, status: "",
+        ranges: {}, result: null, status: "",
       });
     }
     state.preview = null;
