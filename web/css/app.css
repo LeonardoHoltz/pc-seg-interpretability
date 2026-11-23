@@ -184,9 +184,20 @@ html, body {
 .search-wrap input:focus { border-color: var(--accent-dim); }
 .search-wrap input::placeholder { color: var(--text-faint); }
 
+.scene-group.collapsed .scene-group-body { display: none; }
+.scene-group.collapsed .group-caret { transform: rotate(-90deg); }
+
 .group-label {
-  padding: 12px 14px 5px; font-size: 10px; font-weight: 600;
+  padding: 8px 14px 6px; font-size: 10px; font-weight: 600;
   letter-spacing: .7px; text-transform: uppercase; color: var(--text-faint);
+  cursor: pointer; display: flex; align-items: center; gap: 6px;
+  user-select: none;
+}
+.group-label:hover { color: var(--text-dim); }
+.group-caret { font-size: 9px; transition: transform .15s; flex: none; }
+.group-count {
+  margin-left: auto; font-size: 10px; font-weight: 400;
+  color: var(--text-faint); letter-spacing: 0;
 }
 
 .scene {

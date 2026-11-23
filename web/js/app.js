@@ -172,6 +172,9 @@ function sceneMatches(scene, needle) {
 
 const SEG_HINT = /^(label|labels|classification|class|semantic|seg|segmentation|instance|category|panoptic|object)/i;
 
+// Keys of groups the user has explicitly expanded; all others start collapsed.
+const expandedGroups = new Set();
+
 function renderSceneList() {
   const list = $("#scene-list");
   list.innerHTML = "";
@@ -196,9 +199,49 @@ function renderSceneList() {
     groups.get(key).push(s);
   }
 
+  // When filtering, expand everything so results are visible.
+  const filtering = needle.length > 0;
+
   for (const [folder, scenes] of [...groups].sort((a, b) => a[0].localeCompare(b[0]))) {
-    list.appendChild(el("div", "group-label", folder || "scenes"));
-    for (const scene of scenes) list.appendChild(renderSceneCard(scene));
+    const key = folder || "scenes";
+    // Auto-expand the group that contains the currently open scene.
+    const hasActive = scenes.some((s) => s.id === state.currentId);
+    if (hasActive) expandedGroups.add(key);
+
+    const isExpanded = filtering || expandedGroups.has(key);
+
+    const group = el("div", "scene-group");
+    if (!isExpanded) group.classList.add("collapsed");
+
+    const header = el("div", "group-label");
+    header.appendChild(el("span", "group-caret", "▾"));
+    header.appendChild(el("span", "", key.toUpperCase()));
+    header.appendChild(el("span", "group-count", `${scenes.length}`));
+
+    const body = el("div", "scene-group-body");
+
+    const populate = () => {
+      if (body.dataset.loaded) return;
+      body.dataset.loaded = "1";
+      for (const scene of scenes) body.appendChild(renderSceneCard(scene));
+    };
+
+    header.addEventListener("click", () => {
+      const closing = !group.classList.contains("collapsed");
+      group.classList.toggle("collapsed");
+      if (closing) {
+        expandedGroups.delete(key);
+      } else {
+        expandedGroups.add(key);
+        populate();
+      }
+    });
+    group.appendChild(header);
+
+    if (isExpanded) populate();
+    group.appendChild(body);
+
+    list.appendChild(group);
   }
 }
 
