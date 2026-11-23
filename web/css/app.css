@@ -189,11 +189,11 @@ html, body {
 
 .group-label {
   padding: 8px 14px 6px; font-size: 10px; font-weight: 600;
-  letter-spacing: .7px; text-transform: uppercase; color: var(--text-faint);
+  letter-spacing: .7px; text-transform: uppercase; color: var(--accent);
   cursor: pointer; display: flex; align-items: center; gap: 6px;
   user-select: none;
 }
-.group-label:hover { color: var(--text-dim); }
+.group-label:hover { color: var(--text); }
 .group-caret { font-size: 9px; transition: transform .15s; flex: none; }
 .group-count {
   margin-left: auto; font-size: 10px; font-weight: 400;
@@ -276,7 +276,7 @@ html, body {
 .section.collapsed > header .caret { transform: rotate(-90deg); }
 .section > header h2 {
   margin: 0; font-size: 10.5px; font-weight: 600;
-  letter-spacing: .7px; text-transform: uppercase; color: var(--text-dim); flex: 1;
+  letter-spacing: .7px; text-transform: uppercase; color: var(--text); flex: 1;
 }
 .section > header .count {
   font-size: 10px; color: var(--text-faint); font-family: var(--mono);
@@ -494,7 +494,7 @@ select:focus, .btn:focus { border-color: var(--accent-dim); }
   display: flex; align-items: center; gap: 7px;
   padding: 11px 14px 5px;
   font-size: 10px; font-weight: 600; letter-spacing: .7px;
-  text-transform: uppercase; color: var(--text-faint);
+  text-transform: uppercase; color: var(--accent);
 }
 .lib-group-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Always hard right, with or without a dataset tag between. */
@@ -799,6 +799,8 @@ input[type=range]:disabled::-moz-range-thumb { background: var(--text-faint); }
 /* ------------------------------------------------------- segmentation tab */
 #segmentation-body { padding: 12px 14px 18px; }
 #segmentation-body .ctl { margin-bottom: 8px; }
+#interpretability-body { padding: 12px 14px 18px; }
+#interpretability-body .ctl { margin-bottom: 8px; }
 
 .text-input {
   width: 100%; background: var(--bg-raised); border: 1px solid var(--line);
@@ -810,7 +812,7 @@ input[type=range]:disabled::-moz-range-thumb { background: var(--text-faint); }
 .seg-head, .seg-head-plain {
   display: flex; align-items: center; justify-content: space-between;
   margin: 16px 0 8px; font-size: 10px; font-weight: 600;
-  letter-spacing: .7px; text-transform: uppercase; color: var(--text-faint);
+  letter-spacing: .7px; text-transform: uppercase; color: var(--accent);
 }
 .seg-head .btn.small { width: auto; }
 
@@ -836,7 +838,7 @@ input[type=range]:disabled::-moz-range-thumb { background: var(--text-faint); }
 }
 
 /* ------------------------------------------- ceteris paribus / chart */
-.seg-interp { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line-soft); }
+.seg-interp { margin-top: 0; padding-top: 0; border-top: none; }
 .seg-interp .segmented { margin: 8px 0; }
 
 .cp-title { margin-top: 14px; }
@@ -875,6 +877,7 @@ input[type=range]:disabled::-moz-range-thumb { background: var(--text-faint); }
 .cp-range .xyz-cell > span { width: auto; font-size: 9.5px; }
 .seg-block { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--line-soft); }
 .seg-block:first-of-type { border-top: 0; padding-top: 0; }
+#interpretability-body .seg-block { border-top-color: var(--accent-dim); }
 
 /* Choosing the analysis target by clicking it in the viewport. */
 .pick-row { display: flex; gap: 6px; align-items: stretch; }

@@ -1217,6 +1217,10 @@ for (const btn of document.querySelectorAll("#left-tabs button")) {
       page.classList.toggle("on", page.dataset.page === btn.dataset.tab);
     }
     if (btn.dataset.tab === "segmentation") segmentation.loadPreview();
+    if (btn.dataset.tab === "interpretability") {
+      segmentation.loadPreview();
+      segmentation.renderInterpretability();
+    }
   });
 }
 

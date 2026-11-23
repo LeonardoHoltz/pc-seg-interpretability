@@ -222,11 +222,23 @@ export function createSegmentation({
       host.appendChild(res);
     }
 
-    const interp = el("div", "seg-interp");
-    host.appendChild(interp);
-    renderCeteris(interp);
+    renderInterpretability();
   }
   api.render = render;
+
+  function renderInterpretability() {
+    const host = $("#interpretability-body");
+    if (!host) return;
+    host.innerHTML = "";
+    const info = getSceneInfo();
+    if (!info) {
+      host.appendChild(el("div", "empty-note",
+        "Load a scene first."));
+      return;
+    }
+    renderCeteris(host);
+  }
+  api.renderInterpretability = renderInterpretability;
 
   // ------------------------------------------------- ceteris paribus panel
   const axisLabel = (axis) => axis === "z" ? "Z height" : `${axis.toUpperCase()} position`;

@@ -23,6 +23,8 @@
       <button data-tab="library" role="tab">Object library</button>
       <button data-tab="segmentation" role="tab"
               title="Send this scene to a segmentation service">Segmentation</button>
+      <button data-tab="interpretability" role="tab"
+              title="Probe the model around objects in this scene">Interpretability</button>
     </nav>
   </header>
 
@@ -52,6 +54,11 @@
     <div class="tab-page" data-page="segmentation">
       <div class="tab-hint">Send this scene for inference, then probe the model</div>
       <div class="panel-body" id="segmentation-body"></div>
+    </div>
+
+    <div class="tab-page" data-page="interpretability">
+      <div class="tab-hint">Probe the model around objects in this scene</div>
+      <div class="panel-body" id="interpretability-body"></div>
     </div>
 
     <!-- Its own area under the tabs: what is loose in the scene stays in view
