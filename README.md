@@ -21,6 +21,7 @@ For how the code is organised and why, see [ARCHITECTURE.md](ARCHITECTURE.md).
   - [Field roles](#field-roles)
   - [Scene thumbnails](#scene-thumbnails)
   - [Datasets](#datasets)
+  - [Downloading ScanNet](#downloading-scannet)
 - [Colouring](#colouring)
   - [Segmentation fields](#segmentation-fields)
 - [Object library](#object-library)
@@ -217,6 +218,52 @@ dataset — the original behaviour.
 
 Class names and colours are a separate, per-dataset concern; see
 [Segmentation fields](#segmentation-fields) for `config/<id>/classes.json`.
+
+### Downloading ScanNet
+
+The [Pointcept/scannet-compressed](https://huggingface.co/datasets/Pointcept/scannet-compressed)
+dataset on Hugging Face is what the ScanNet scenes here expect.
+
+> **Access required.** The dataset is gated. Request access on the dataset page and
+> wait for approval before attempting to download. Then authenticate:
+> ```bash
+> hf auth login   # or set the HF_TOKEN environment variable
+> ```
+
+Two ways to get it:
+
+**git clone (git-xet)** — run from the repo root; clones to `./scannet-compressed/`.
+
+```bash
+# Install git-xet (https://hf.co/docs/hub/git-xet)
+brew install git-xet
+git xet install
+
+# When prompted for a password, use an access token from https://huggingface.co/settings/tokens
+git clone https://huggingface.co/datasets/Pointcept/scannet-compressed
+```
+
+To fetch only the file pointers without downloading the large data files:
+
+```bash
+GIT_LFS_SKIP_SMUDGE=1 git clone https://huggingface.co/datasets/Pointcept/scannet-compressed
+```
+
+**Hugging Face CLI** — downloads to `./scannet-compressed/`.
+
+```bash
+# Install the hf CLI
+curl -LsSf https://hf.co/cli/install.sh | bash
+
+# Download directly into ./scannet-compressed/
+hf download Pointcept/scannet-compressed --repo-type=dataset --local-dir ./scannet-compressed
+```
+
+The dataset is a single tarball — extract it in place:
+
+```bash
+tar -xzf ./scannet-compressed/scannet.tar.gz -C ./scannet-compressed
+```
 
 ---
 

@@ -8,3 +8,5 @@ __pycache__/
 
 # pixi -- the solved env; pixi.lock is committed, this is not
 .pixi/
+
+scannet-compressed

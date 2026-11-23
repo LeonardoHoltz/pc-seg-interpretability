@@ -163,7 +163,7 @@ export async function runSaliency(sceneId, opts = {}) {
   const { scene: updated } = rewriteSceneWithAttributes(sceneId, {
     cacheDir: cacheDirFor(sceneId),
     add: [{
-      name: attribute, label, kind: "continuous", values,
+      name: attribute, label, kind: "saliency", values,
       displayRange: [-p98, p98],
     }],
     onProgress,

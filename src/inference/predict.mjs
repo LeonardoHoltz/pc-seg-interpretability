@@ -141,7 +141,7 @@ export async function runSegmentation(sceneId, endpoint, options = {}) {
   const add = [{
     name: PREDICTION_ATTRIBUTE,
     label: "Predicted class",
-    kind: "categorical",
+    kind: "prediction",
     values: predicted,
     classes,
   }];
@@ -149,7 +149,7 @@ export async function runSegmentation(sceneId, endpoint, options = {}) {
     add.push({
       name: `${PREDICTION_ATTRIBUTE}_score`,
       label: "Prediction score",
-      kind: "continuous",
+      kind: "prediction",
       values: scoreCol,
     });
   }

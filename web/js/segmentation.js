@@ -222,11 +222,23 @@ export function createSegmentation({
       host.appendChild(res);
     }
 
-    const interp = el("div", "seg-interp");
-    host.appendChild(interp);
-    renderCeteris(interp);
+    renderInterpretability();
   }
   api.render = render;
+
+  function renderInterpretability() {
+    const host = $("#interpretability-body");
+    if (!host) return;
+    host.innerHTML = "";
+    const info = getSceneInfo();
+    if (!info) {
+      host.appendChild(el("div", "empty-note",
+        "Load a scene first."));
+      return;
+    }
+    renderCeteris(host);
+  }
+  api.renderInterpretability = renderInterpretability;
 
   // ------------------------------------------------- ceteris paribus panel
   const axisLabel = (axis) => axis === "z" ? "Z height" : `${axis.toUpperCase()} position`;
@@ -523,6 +535,7 @@ export function createSegmentation({
     cpBlock.appendChild(el("div", "lib-meta",
       "Move the object along X, Y or Z while holding the other two coordinates " +
       "and the rest of the scene fixed."));
+    collapsible(cpBlock);
     host.appendChild(cpBlock);
 
     const axisCtl = el("div", "ctl");
@@ -538,8 +551,8 @@ export function createSegmentation({
       axes.appendChild(b);
     }
     axisCtl.appendChild(axes);
-    host.appendChild(axisCtl);
-    host.appendChild(el("div", "lib-meta", cp.axis === "z"
+    cpBlock.appendChild(axisCtl);
+    cpBlock.appendChild(el("div", "lib-meta", cp.axis === "z"
       ? "Absolute height of the object's base in metres; X and Y stay fixed."
       : `Absolute ${cp.axis.toUpperCase()} coordinate of the object's footprint centre in metres; `
         + `${cp.axis === "x" ? "Y" : "X"} and Z stay fixed.`));
@@ -567,14 +580,14 @@ export function createSegmentation({
       row.appendChild(cell);
     }
     rangeCtl.appendChild(row);
-    host.appendChild(rangeCtl);
+    cpBlock.appendChild(rangeCtl);
 
     const run = el("button", "btn primary", "Run ceteris paribus");
     run.disabled = cp.running || state.running || state.sal.running;
     run.addEventListener("click", () => runCeteris());
-    host.appendChild(run);
+    cpBlock.appendChild(run);
 
-    if (cp.status) host.appendChild(el("div", "seg-status", cp.status));
+    if (cp.status) cpBlock.appendChild(el("div", "seg-status", cp.status));
 
     // --- result ---
     if (cp.result) {
@@ -587,7 +600,7 @@ export function createSegmentation({
       title.appendChild(el("div", "lib-meta",
         `object #${r.instanceId} · ${fmtInt(r.objectPoints)} points · ` +
         `one request, ${fmtBytes(r.requestBytes)} out / ${fmtBytes(r.responseBytes)} back`));
-      host.appendChild(title);
+      cpBlock.appendChild(title);
 
       const toggle = el("div", "segmented");
       for (const [key, caption] of [["chart", "Chart"], ["table", "Table"]]) {
@@ -595,19 +608,28 @@ export function createSegmentation({
         b.addEventListener("click", () => { cp.view = key; render(); });
         toggle.appendChild(b);
       }
-      host.appendChild(toggle);
+      cpBlock.appendChild(toggle);
 
       const plot = el("div", "cp-plot");
-      host.appendChild(plot);
+      cpBlock.appendChild(plot);
       if (cp.view === "chart") drawChart(plot, r); else drawTable(plot, r);
       // Fetch the object's cloud now so the first hover has nothing to wait for.
       onPreload?.({ instanceId: r.instanceId });
-      host.appendChild(el("div", "lib-meta",
+      cpBlock.appendChild(el("div", "lib-meta",
         "Hover a point to see the object at that height, drawn translucent in the scene."));
     }
 
     renderSaliency(host);
     renderAblation(host);
+  }
+
+  function collapsible(block) {
+    const head = block.querySelector(".seg-head-plain");
+    if (!head) return;
+    const caret = el("span", "seg-caret", "▾");
+    head.prepend(caret);
+    block.classList.add("collapsed");
+    head.addEventListener("click", () => block.classList.toggle("collapsed"));
   }
 
   /**
@@ -626,6 +648,7 @@ export function createSegmentation({
     block.appendChild(el("div", "lib-meta",
       "One scalar per point for the focused object. The service decides what it " +
       "measures and how it is aggregated; it arrives as a scalar field in Colour by."));
+    collapsible(block);
 
     block.appendChild(methodSelect(sal.method, (m) => { sal.method = m; }));
 
@@ -702,6 +725,7 @@ export function createSegmentation({
     block.appendChild(el("div", "lib-meta",
       "Two heatmaps for the focused object, their difference, and the object " +
       "re-segmented without the points at the top of it."));
+    collapsible(block);
 
     if (!classes?.length) {
       block.appendChild(el("div", "lib-meta", "This scene has no class names yet."));
