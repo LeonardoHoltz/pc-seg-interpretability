@@ -298,6 +298,13 @@ html, body {
 }
 .attr .badge.seg { background: rgba(78,158,255,.15); color: var(--accent); }
 .attr .badge.lut { background: rgba(69,199,138,.15); color: var(--good); }
+.attr .badge.inf { background: rgba(255,180,50,.13); color: #c89030; }
+
+.attr-group {
+  font-size: 9px; text-transform: uppercase; letter-spacing: .6px;
+  color: var(--text-faint); padding: 10px 10px 4px; pointer-events: none;
+}
+.attr-group:first-child { padding-top: 4px; }
 
 /* generic control rows */
 .ctl { margin-bottom: 12px; }

@@ -434,21 +434,40 @@ function attributeOptions() {
   if (!info) return [];
   const out = [];
 
+  // Inference attributes identified from scene metadata — works for both
+  // new-format (kind already set) and old cached scenes (kind was "categorical"
+  // or "continuous" before this distinction was added).
+  const inferenceNames = new Set([
+    ...(info.prediction ? ["prediction", "prediction_score"] : []),
+    ...(info.saliencyRuns ?? []).map((r) => r.attribute).filter(Boolean),
+    ...(info.saliency?.attribute ? [info.saliency.attribute] : []),
+  ]);
+
   for (const a of info.attributes) {
-    if (a.kind === "color") {
-      out.push({ ...a, potreeName: "rgba", label: "RGB colour", kind: "color" });
-    } else if (a.kind === "classification") {
-      out.push({ ...a, potreeName: "classification", kind: "classification" });
-    } else if (a.name === "intensity") {
-      out.push({ ...a, potreeName: "intensity", kind: "intensity" });
-      out.push({ ...a, potreeName: "intensity gradient", label: "Intensity (gradient)", kind: "intensity" });
+    const isInference = inferenceNames.has(a.name);
+    const kind = isInference && (a.kind === "categorical" || a.kind === "continuous")
+      ? (a.classes ? "prediction" : a.name === "prediction_score" ? "prediction" : "saliency")
+      : a.kind;
+
+    if (kind === "color") {
+      out.push({ ...a, kind, potreeName: "rgba", label: "RGB colour", group: "scene" });
+    } else if (kind === "classification") {
+      out.push({ ...a, kind, potreeName: "classification", group: "annotation" });
+    } else if (a.name === "intensity" && !isInference) {
+      out.push({ ...a, kind, potreeName: "intensity", group: "scene" });
+      out.push({ ...a, kind, potreeName: "intensity gradient", label: "Intensity (gradient)", group: "scene" });
+    } else if (kind === "prediction" || kind === "saliency") {
+      out.push({ ...a, kind, potreeName: a.name, group: "inference" });
     } else {
-      out.push({ ...a, potreeName: a.name });
+      out.push({ ...a, kind, potreeName: a.name, group: kind === "categorical" ? "annotation" : "scene" });
     }
   }
 
-  out.push({ name: "__elevation", potreeName: "elevation", label: "Elevation", kind: "builtin" });
-  out.push({ name: "__lod", potreeName: "level of detail", label: "Octree level", kind: "builtin" });
+  out.push({ name: "__elevation", potreeName: "elevation", label: "Elevation", kind: "builtin", group: "scene" });
+  out.push({ name: "__lod", potreeName: "level of detail", label: "Octree level", kind: "builtin", group: "scene" });
+
+  const GROUP_ORDER = { annotation: 0, scene: 1, inference: 2 };
+  out.sort((a, b) => (GROUP_ORDER[a.group] ?? 1) - (GROUP_ORDER[b.group] ?? 1));
   return out;
 }
 
@@ -458,7 +477,15 @@ function buildAttributePanel() {
   const options = attributeOptions();
   $("#attr-count").textContent = `${options.length}`;
 
+  const GROUP_LABELS = { annotation: "Labels", scene: "Scene", inference: "Inference" };
+  let currentGroup = null;
+
   for (const opt of options) {
+    if (opt.group !== currentGroup) {
+      currentGroup = opt.group;
+      if (currentGroup) host.appendChild(el("div", "attr-group", GROUP_LABELS[currentGroup] ?? currentGroup));
+    }
+
     const item = el("div", "attr");
     item.dataset.key = opt.potreeName;
 
@@ -475,6 +502,8 @@ function buildAttributePanel() {
 
     if (opt.kind === "classification") item.appendChild(el("span", "badge lut", "classes"));
     else if (opt.kind === "categorical") item.appendChild(el("span", "badge seg", "categorical"));
+    else if (opt.kind === "prediction") item.appendChild(el("span", "badge inf", opt.classes ? "classes" : "scalar"));
+    else if (opt.kind === "saliency") item.appendChild(el("span", "badge inf", "saliency"));
     else if (opt.kind === "continuous") item.appendChild(el("span", "badge", "scalar"));
     else if (opt.kind === "color") item.appendChild(el("span", "badge", "rgb"));
 
@@ -485,7 +514,8 @@ function buildAttributePanel() {
 
 function swatchFor(opt) {
   if (opt.kind === "color") return "linear-gradient(135deg,#e05c68,#45c78a,#4e9eff)";
-  if (opt.kind === "classification" || opt.kind === "categorical") {
+  if (opt.kind === "classification" || opt.kind === "categorical"
+      || (opt.kind === "prediction" && opt.classes)) {
     const classes = opt.classes ?? state.info?.classification?.classes ?? [];
     const cols = classes.slice(0, 4).map((c) => rgbCss(c.color));
     if (cols.length === 0) return "#555";
@@ -514,7 +544,8 @@ function swatchFor(opt) {
 let gradientCache = { key: null, value: null };
 
 function currentGradient(opt, st) {
-  if (opt.kind !== "categorical") return Potree.Gradients[st.gradient];
+  const isCategorical = opt.kind === "categorical" || (opt.kind === "prediction" && opt.classes);
+  if (!isCategorical) return Potree.Gradients[st.gradient];
 
   const cs = classStateFor(opt);
   const classes = classesFor(opt).map((c) => ({ ...c, color: cs.get(c.index)?.color ?? c.color }));
@@ -576,7 +607,8 @@ function styleMaterial(pointcloud) {
     : (available.includes("rgba") ? "rgba" : "elevation");
 
   const st = attrStateFor(opt);
-  if (opt.kind === "categorical" || opt.kind === "continuous") {
+  if (opt.kind === "categorical" || opt.kind === "continuous"
+      || opt.kind === "prediction" || opt.kind === "saliency") {
     material.gradient = currentGradient(opt, st);
     material.setRange(opt.potreeName, st.range.slice());
   } else if (opt.kind === "intensity") {
@@ -622,8 +654,9 @@ function attrStateFor(opt) {
     // scaling it to its own extremes shows one grey cloud.
     const opening = opt.displayRange
       ?? (signed ? symmetricRange(opt) : [opt.min ?? 0, opt.max ?? 1]);
+    const isCategoricalLike = opt.kind === "categorical" || (opt.kind === "prediction" && opt.classes);
     state.attrState.set(key, {
-      gradient: opt.kind === "categorical" ? null : (signed ? "DIVERGING" : "SPECTRAL"),
+      gradient: isCategoricalLike ? null : (signed ? "DIVERGING" : "SPECTRAL"),
       range: opening.slice(),
     });
   }
@@ -675,7 +708,8 @@ function buildMappingPanel(opt) {
   const host = $("#mapping-content");
   host.innerHTML = "";
   $("#mapping-title").textContent =
-    opt.kind === "classification" || opt.kind === "categorical" ? "Classes" : "Mapping";
+    opt.kind === "classification" || opt.kind === "categorical"
+    || (opt.kind === "prediction" && opt.classes) ? "Classes" : "Mapping";
 
   if (opt.kind === "color") {
     host.appendChild(el("div", "note",
@@ -688,7 +722,8 @@ function buildMappingPanel(opt) {
       : "Colour by octree level, which shows how the viewer is streaming detail."));
     return;
   }
-  if (opt.kind === "classification" || opt.kind === "categorical") {
+  if (opt.kind === "classification" || opt.kind === "categorical"
+      || (opt.kind === "prediction" && opt.classes)) {
     buildClassPanel(host, opt);
     return;
   }
